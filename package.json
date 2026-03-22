@@ -1,0 +1,27 @@
+{
+  "name": "twstats-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Zamanlanmış TW Stats özeti → Telegram",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check-config": "node check-config.js",
+    "telegram-updates": "node index.js --telegram-updates",
+    "send-test": "node index.js --send-test",
+    "dry-run": "node index.js --dry-run",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:restart": "pm2 restart ecosystem.config.cjs --only twstats-bot",
+    "update:server": "bash scripts/update-server.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3"
+  }
+}

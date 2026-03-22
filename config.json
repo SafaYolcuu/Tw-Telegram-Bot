@@ -1,0 +1,49 @@
+{
+  "timezone": "Europe/Istanbul",
+  "schedule": ["12:00", "00:00"],
+  "worldLabel": "TR101",
+  "requestDelayMs": 800,
+  "twStatsDisplayedUtcOffsetMinutes": 60,
+  "playerConquerStatsDays": 3,
+  "maxPlayerConquerPages": 35,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) twstats-telegram-bot/1.0",
+  "telegramPlayerAliases": {
+    "kubilay": "HardZooM",
+    "cemil": "koloniis",
+    "fahri": "ozzzbek",
+    "emre": ".emrebey.",
+    "eyüp": "MANCHESTER CITY F.C.",
+    "berkay": "simosm",
+    "safa": "heinaxx",
+    "suat": "masculine41",
+    "furkan": "floydian1",
+    "alper": "ceymakcur500",
+    "mert": "qmanyaq",
+    "mahmut": "mahmutbyz",
+    "ozan": "procyon",
+    "övünç": "maxel",
+    "hasan": "hasan6576"
+  },
+  "sources": [
+    {
+      "type": "tribe_top_villages_and_today_conquers",
+      "gameGuestRankingUrl": "https://tr101.klanlar.org/guest.php?screen=ranking&mode=ally",
+      "rankingUrl": "https://tr.twstats.com/tr101/index.php?page=rankings&mode=tribes",
+      "matchHeaders": [
+        "Rank",
+        "Tag",
+        "Points of best 40",
+        "Total Points",
+        "Members",
+        "Average points per member",
+        "Villages",
+        "Average points per village"
+      ],
+      "maxRows": 10,
+      "todayConquerMethod": "tribe_pages",
+      "maxTribeConquerPages": 25,
+      "maxEnnoblementPages": 40,
+      "trackTribeTransfers": true
+    }
+  ]
+}
