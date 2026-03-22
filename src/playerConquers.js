@@ -16,6 +16,26 @@ function normTr(s) {
   return normalizeCellText(s).toLocaleLowerCase('tr-TR');
 }
 
+/**
+ * TWStats’te sık görülen baş/son yıldızlar (örn. **nick**); ara boşluk/zero-width ile birlikte kırpılır.
+ */
+function stripOuterAsterisks(s) {
+  let t = normalizeCellText(String(s));
+  let prev;
+  do {
+    prev = t;
+    t = t
+      .replace(/^[\s\u200b\u200c\u200d\*＊∗]+/u, '')
+      .replace(/[\s\u200b\u200c\u200d\*＊∗]+$/u, '');
+    t = normalizeCellText(t);
+  } while (t !== prev);
+  return t;
+}
+
+function normTrNickComparable(s) {
+  return normTr(stripOuterAsterisks(s));
+}
+
 export function worldIndexBaseFromRankingUrl(rankingUrl) {
   const u = new URL(rankingUrl);
   return `${u.origin}${u.pathname}`;
@@ -49,10 +69,12 @@ function playerConquersPageUrl(worldBase, playerId, pageNum) {
  */
 export async function searchPlayerByName(worldBase, ingameSearchName, options = {}) {
   const { userAgent } = options;
-  const url = playerSearchUrl(worldBase, ingameSearchName);
+  const stripped = stripOuterAsterisks(ingameSearchName);
+  const searchQuery = stripped.length ? stripped : ingameSearchName;
+  const url = playerSearchUrl(worldBase, searchQuery);
   const html = await fetchHtml(url, { userAgent });
   const $ = cheerio.load(html);
-  const targetNorm = normTr(ingameSearchName);
+  const targetNorm = normTrNickComparable(ingameSearchName);
   /** @type {Map<string, string>} */
   const byId = new Map();
   $('a[href*="page=player"]').each((_, a) => {
@@ -67,7 +89,7 @@ export async function searchPlayerByName(worldBase, ingameSearchName, options = 
   });
   const entries = [...byId.entries()];
   if (entries.length === 0) return null;
-  const exact = entries.find(([, name]) => normTr(name) === targetNorm);
+  const exact = entries.find(([, name]) => normTrNickComparable(name) === targetNorm);
   if (exact) return { playerId: exact[0], matchedName: exact[1] };
   // Tek satır olsa bile isim tam eşleşmiyorsa kabul etme (örn. arama "safa" → yanlışlıkla "safadinho").
   return null;
@@ -75,8 +97,10 @@ export async function searchPlayerByName(worldBase, ingameSearchName, options = 
 
 function ownerCellComparable($, td) {
   const $a = $(td).find('a.playerlink').first();
-  const raw = $a.length ? normalizeCellText($a.text()) : normalizeCellText($(td).text());
-  return normTr(raw.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim());
+  let raw = $a.length ? normalizeCellText($a.text()) : normalizeCellText($(td).text());
+  raw = raw.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+  raw = stripOuterAsterisks(raw);
+  return normTr(raw);
 }
 
 /**
@@ -162,7 +186,7 @@ export async function countPlayerConquersLastNDays({
 }) {
   const todayYmd = ymdInTimeZone(timeZone);
   const minYmd = ymdAddCalendarDays(todayYmd, -(days - 1));
-  const ingameNorm = normTr(ingameName);
+  const ingameNorm = normTrNickComparable(ingameName);
   /** @type {Record<string, number>} */
   const merged = {};
   for (let pn = 1; pn <= maxPages; pn++) {
