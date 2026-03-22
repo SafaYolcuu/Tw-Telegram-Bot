@@ -85,7 +85,7 @@ npm run update:server
 
 ## 4) İsteğe bağlı: GitHub Actions ile otomatik deploy
 
-`main` branch’e push olunca SSH ile sunucuda güncelleme için [.github/workflows/deploy-twstats-bot.yml](../.github/workflows/deploy-twstats-bot.yml) kullanılır.
+`main` branch’e push olunca SSH ile sunucuda güncelleme için [.github/workflows/deploy.yml](.github/workflows/deploy.yml) kullanılır (ayrı repo: [Tw-Telegram-Bot](https://github.com/SafaYolcuu/Tw-Telegram-Bot)).
 
 **Repository secrets** (GitHub → Settings → Secrets and variables → Actions):
 
@@ -94,13 +94,11 @@ npm run update:server
 | `DEPLOY_HOST` | `203.0.113.10` |
 | `DEPLOY_USER` | `ubuntu` |
 | `DEPLOY_SSH_KEY` | Sunucuya giriş için private key tam metni |
-| `DEPLOY_PATH` | Repo kökü, örn. `/opt/yyeni` (`twstats-whatsapp-bot` alt klasörü buradan türetilir) |
+| `DEPLOY_PATH` | Bu botun klon kökü (içinde `package.json`), örn. `/opt/Tw-Telegram-Bot` |
 
 Sunucuda Actions için ayrı bir SSH public key veya mevcut kullanıcı anahtarı tanımlayın; `DEPLOY_SSH_KEY` buna karşılık gelen **private** key olmalı.
 
-Workflow yalnızca `twstats-whatsapp-bot/**` veya workflow dosyası değişince tetiklenir.
-
-**Sadece bot klasörü ayrı repo ise:** `.github/workflows/deploy-twstats-bot.yml` içinde `cd twstats-whatsapp-bot` satırını kaldırın; `DEPLOY_PATH` secret’ını bot kök dizinine (örn. `/opt/twstats-whatsapp-bot`) verin.
+**Monorepo** (`yyeni` içinde `twstats-whatsapp-bot` alt klasörü) kullanıyorsanız üst dizindeki workflow farklıdır; bu dosya **yalnızca ayrı bot reposu** içindir.
 
 ## Özet
 
