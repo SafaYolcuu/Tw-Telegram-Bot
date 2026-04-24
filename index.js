@@ -366,20 +366,20 @@ function startBot() {
             if (findErr || !victim) {
               throw new Error(findErr || 'Klan bulunamadı.');
             }
-            const topN = tribeSrc?.maxRows ?? 10;
-            const maxEnn = tribeSrc?.maxEnnoblementPages ?? 40;
+            const topN = tribeSrc?.victimReportTopTribes ?? 25;
+            const maxTribePages = tribeSrc?.maxTribeConquerPages ?? 25;
             const { error, lines, victimName } = await countTakesFromVictimAmongTopTribes(rankingUrl, matchHeaders, {
               targetYmd: y,
               victimTribeId: victim.tribeId,
               victimName: victim.name,
               topTribeRows: topN,
-              maxEnnPages: maxEnn,
+              maxTribeConquerPages: maxTribePages,
               userAgent: freshCfg.userAgent,
               delayMs: freshCfg.requestDelayMs ?? 0,
               rankingHtml: rankHtml,
             });
             if (error) throw new Error(error);
-            const header = `<b>${escapeHtml(y)}</b> — <b>${escapeHtml(victimName)}</b> köylerini ilk <b>${topN}</b> sıradaki hangi klanlar almış\n<i>(TWStats dünya fetih listesi, tarih sütunu günü)</i>`;
+            const header = `<b>${escapeHtml(y)}</b> — <b>${escapeHtml(victimName)}</b> köylerini ilk <b>${topN}</b> sıradaki hangi klanlar almış\n<i>(TWStats klan fetih sayfası — kırmızı/kayıp satırlar, tarih sütunu günü)</i>`;
             const body =
               lines.length > 0
                 ? lines.map((ln) => escapeHtml(ln)).join('\n')

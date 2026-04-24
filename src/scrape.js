@@ -292,33 +292,69 @@ function tribeIdFromOwnerTribeCell($, td) {
   return m ? m[1] : null;
 }
 
+function tribeConquerRowIsRedLoss($, tds) {
+  if (!tds.length) return false;
+  const src = ($(tds[0]).find('img').first().attr('src') || '').toLowerCase();
+  return src.includes('red.png');
+}
+
 /**
- * Dünya ennoblements: `targetYmd` gününde eski sahibi `victimTribeId` olan fetihlerde,
- * yeni sahibi `winnerTribeIdSet` içinde olan satırları klan id → adet olarak sayar.
- * Tarih: TWStats hücresindeki YYYY-MM-DD (klan fetihleriyle aynı mantık).
+ * Kurban klanın «conquers» sayfası: `targetYmd` günündeki **kırmızı (kayıp)** satırlarda
+ * yeni sahibi `winnerTribeIdSet` içinde olanları sayar (TWStats klan sayfası = tek kaynak; dünya listesindeki çift satırlardan kaçınır).
  */
-function parseEnnoblementsPageVictimLossesAmongWinners(
+function parseTribeConquersPageRedLossesAmongWinners(
   html,
   targetYmd,
   victimTribeId,
   winnerTribeIdSet
 ) {
   const $ = cheerio.load(html);
-  const $table = findWidgetTable($, ['Village', 'Points', 'Old Owner', 'New Owner', 'Date/Time']);
+  let $table = null;
+  $('table.widget').each((_, el) => {
+    const $t = $(el);
+    const ths = $t
+      .find('tr')
+      .first()
+      .find('th')
+      .map((_, th) => normalizeCellText($(th).text()))
+      .get();
+    const hasV = ths.some((x) => /^village$/i.test(x));
+    const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
+    const hasOld = ths.some((x) => /^old owner$/i.test(x));
+    const hasNew = ths.some((x) => /^new owner$/i.test(x));
+    if (hasV && hasDt && hasOld && hasNew) {
+      $table = $t;
+      return false;
+    }
+  });
   /** @type {Map<string, number>} */
   const counts = new Map();
-  if (!$table) return { counts, hitOlderDay: true };
+  if (!$table || !$table.length) return { counts, hitOlderDay: true };
+
+  const ths = $table
+    .find('tr')
+    .first()
+    .find('th')
+    .map((_, th) => normalizeCellText($(th).text()))
+    .get();
+  const dateIdx = ths.findIndex((t) => /date/i.test(t) && /time/i.test(t));
+  const oldIdx = ths.findIndex((t) => /^old owner$/i.test(t));
+  const newIdx = ths.findIndex((t) => /^new owner$/i.test(t));
+  if (dateIdx < 0 || oldIdx < 0 || newIdx < 0) return { counts, hitOlderDay: true };
 
   const trs = $table.find('tr').toArray();
   if (trs.length <= 1) return { counts, hitOlderDay: true };
 
+  const victimStr = String(victimTribeId);
   let hitOlderDay = false;
   for (let i = 1; i < trs.length; i++) {
     const tr = trs[i];
     if ($(tr).find('td.foot').length) continue;
     const tds = $(tr).find('td').toArray();
-    if (tds.length < 5) continue;
-    const dateRaw = normalizeCellText($(tds[4]).text());
+    if (tds.length <= Math.max(dateIdx, oldIdx, newIdx)) continue;
+    if (!tribeConquerRowIsRedLoss($, tds)) continue;
+
+    const dateRaw = normalizeCellText($(tds[dateIdx]).text());
     const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
     if (!rowYmd) continue;
     if (rowYmd < targetYmd) {
@@ -327,10 +363,10 @@ function parseEnnoblementsPageVictimLossesAmongWinners(
     }
     if (rowYmd > targetYmd) continue;
 
-    const oldId = tribeIdFromOwnerTribeCell($, tds[2]);
-    const newId = tribeIdFromOwnerTribeCell($, tds[3]);
-    if (!oldId || oldId !== victimTribeId) continue;
-    if (!newId || newId === victimTribeId) continue;
+    const oldId = tribeIdFromOwnerTribeCell($, tds[oldIdx]);
+    if (!oldId || oldId !== victimStr) continue;
+    const newId = tribeIdFromOwnerTribeCell($, tds[newIdx]);
+    if (!newId || newId === victimStr) continue;
     if (!winnerTribeIdSet.has(newId)) continue;
     counts.set(newId, (counts.get(newId) || 0) + 1);
   }
@@ -351,6 +387,7 @@ export function findTribeInRankingByTag(html, matchHeaders, tagQuery, maxScanRow
 
 /**
  * `targetYmd` gününde `victimTribeId` klanından köy alan, sıralamada ilk `topTribeRows` içindeki klanların adetleri.
+ * Veri: kurban klanın TWStats **klan fetih** sayfasındaki **kırmızı** (kayıp) satırları (dünya ennoblements değil).
  * `rankingHtml` verilirse sıralama sayfası bir kez daha çekilmez.
  */
 export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeaders, options) {
@@ -359,7 +396,7 @@ export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeader
     victimTribeId,
     victimName: victimNameOpt,
     topTribeRows,
-    maxEnnPages = 40,
+    maxTribeConquerPages = 25,
     userAgent,
     delayMs = 0,
     rankingHtml,
@@ -380,11 +417,11 @@ export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeader
   /** @type {Map<string, number>} */
   const totals = new Map();
   let stop = false;
-  for (let pn = 1; pn <= maxEnnPages && !stop; pn++) {
+  for (let pn = 1; pn <= maxTribeConquerPages && !stop; pn++) {
     try {
-      const url = ennoblementsListUrl(rankingUrl, pn);
+      const url = tribeConquersListUrl(rankingUrl, victimTribeId, pn);
       const html = await fetchHtml(url, { userAgent });
-      const { counts, hitOlderDay } = parseEnnoblementsPageVictimLossesAmongWinners(
+      const { counts, hitOlderDay } = parseTribeConquersPageRedLossesAmongWinners(
         html,
         targetYmd,
         String(victimTribeId),

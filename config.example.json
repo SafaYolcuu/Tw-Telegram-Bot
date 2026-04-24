@@ -40,6 +40,7 @@
         "Average points per village"
       ],
       "maxRows": 10,
+      "victimReportTopTribes": 25,
       "todayConquerMethod": "tribe_pages",
       "maxTribeConquerPages": 25,
       "maxEnnoblementPages": 40,
