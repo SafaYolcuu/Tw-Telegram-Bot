@@ -136,9 +136,20 @@ export function ymdInTimeZone(timeZone, when = new Date()) {
 }
 
 /**
- * TWStats «Date / Time» hücresini `reportTimeZone` takvim gününe çevirir.
- * `twStatsDisplayedUtcOffsetMinutes`: TW’de görünen saatin UTC’den farkı (dakika, doğuya pozitif). Örn. kış CET = 60, yaz CEST = 120 (Türkiye +3 ile ~2 saat fark kışın).
- * Verilmezse yalnızca YYYY-MM-DD ilk parça kullanılır (eski davranış).
+ * TWStats fetih «Date/Time» hücresinin takvim günü: ilk `YYYY-MM-DD` parçası (sitedeki CEST/CET günü).
+ * Klan fetih (`tribe_pages`) sayımı bunu kullanır; İstanbul’a çevirmek 24↔25 gibi sapmalara yol açar.
+ */
+export function twStatsConquerCellLocalYmd(dateRaw) {
+  const trimmed = String(dateRaw).replace(/\s+/g, ' ').trim();
+  const datePart = trimmed.split(/\s+/).filter(Boolean)[0];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return null;
+  return datePart;
+}
+
+/**
+ * TWStats «Date / Time» hücresini `reportTimeZone` takvim gününe çevirir (oyuncu fetihleri, dünya ennoblements).
+ * `twStatsDisplayedUtcOffsetMinutes`: TW’de görünen saatin UTC’den farkı (dakika, doğuya pozitif). Örn. kış CET = 60, yaz CEST = 120.
+ * Verilmezse yalnızca YYYY-MM-DD ilk parça kullanılır.
  */
 export function conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDisplayedUtcOffsetMinutes) {
   const trimmed = String(dateRaw).replace(/\s+/g, ' ').trim();
@@ -160,6 +171,27 @@ export function conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDispl
   const inst = new Date(utcMs);
   if (Number.isNaN(inst.getTime())) return datePart;
   return ymdInTimeZone(reportTimeZone, inst);
+}
+
+/**
+ * TWStats HTML alt damgası (CEST/CET) → «Date/Time» sütununun UTC offset’i (dakika, doğuya pozitif).
+ * Sayfa yaz saatinde CEST iken config’te 60 (CET) kalmışsa gece yarısı civarı fetihler yanlış güne kayar.
+ */
+export function twStatsUtcOffsetMinutesFromHtml(html) {
+  const s = String(html);
+  if (/\bCEST\b/i.test(s)) return 120;
+  if (/\bCET\b/i.test(s)) return 60;
+  return null;
+}
+
+/**
+ * Önce sayfadaki CEST/CET; yoksa `configured` (null ise ham YYYY-MM-DD).
+ */
+export function resolveTwStatsUtcOffsetMinutes(html, configured) {
+  const fromPage = twStatsUtcOffsetMinutesFromHtml(html);
+  if (fromPage != null) return fromPage;
+  if (configured == null || Number.isNaN(Number(configured))) return null;
+  return Number(configured);
 }
 
 function isValidGregorianYmd(year, month, day) {
@@ -328,6 +360,7 @@ function overlayTribePointsAndVillagesFromGuest(tribes, guestRows) {
  * Bir ennoblements sayfası; bugün (todayYmd) olan satırları sayar, ilk eski güne gelince durur.
  */
 function parseEnnoblementsPageForToday(html, targetYmd, reportTimeZone, twStatsDisplayedUtcOffsetMinutes) {
+  const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
   const $table = findWidgetTable($, ['Village', 'Points', 'Old Owner', 'New Owner', 'Date/Time']);
   const counts = new Map();
@@ -344,7 +377,7 @@ function parseEnnoblementsPageForToday(html, targetYmd, reportTimeZone, twStatsD
     const tds = $tr.find('td').toArray();
     if (tds.length < 5) continue;
     const dateRaw = normalizeCellText($(tds[4]).text());
-    const reportYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDisplayedUtcOffsetMinutes);
+    const reportYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twOff);
     if (!reportYmd) continue;
     if (reportYmd < targetYmd) {
       hitOlderDay = true;
@@ -383,9 +416,20 @@ function tribeConquersListUrl(rankingUrl, tribeId, pageNum) {
 }
 
 /**
- * Klan «conquers» sayfasındaki tablo (Village … Date/Time); bugünkü satırları sayar.
+ * TWStats klan fetih tablosunda ilk hücredeki ikon: yeşil = klanın aldığı köy, kırmızı = kayıp, sarı = iç transfer vb.
+ * «Alınan köy» sayımı yalnızca yeşil satırlarla uyumlu olmalı (aksi halde kırmızılar da eklenir).
  */
-function parseTribeConquersWidgetForToday(html, targetYmd, reportTimeZone, twStatsDisplayedUtcOffsetMinutes) {
+function tribeConquerRowIsGreenGain($, tds) {
+  if (!tds.length) return false;
+  const src = ($(tds[0]).find('img').first().attr('src') || '').toLowerCase();
+  return src.includes('green.png');
+}
+
+/**
+ * Klan «conquers» sayfasındaki tablo (Village … Date/Time); hedef güne denk gelen **yeşil (alım)** satırlarını sayar.
+ * Gün eşlemesi: hücredeki `YYYY-MM-DD` (TWStats’ın CEST/CET takvimi); `conquerReportYmdFromTwCell` kullanılmaz.
+ */
+function parseTribeConquersWidgetForToday(html, targetYmd) {
   const $ = cheerio.load(html);
   let $table = null;
   $('table.widget').each((_, el) => {
@@ -398,7 +442,9 @@ function parseTribeConquersWidgetForToday(html, targetYmd, reportTimeZone, twSta
       .get();
     const hasV = ths.some((x) => /^village$/i.test(x));
     const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
-    if (hasV && hasDt) {
+    const hasOld = ths.some((x) => /^old owner$/i.test(x));
+    const hasNew = ths.some((x) => /^new owner$/i.test(x));
+    if (hasV && hasDt && hasOld && hasNew) {
       $table = $t;
       return false;
     }
@@ -425,31 +471,25 @@ function parseTribeConquersWidgetForToday(html, targetYmd, reportTimeZone, twSta
     const tds = $(tr).find('td').toArray();
     if (tds.length <= dateIdx) continue;
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
-    const reportYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDisplayedUtcOffsetMinutes);
-    if (!reportYmd) continue;
-    if (reportYmd < targetYmd) {
+    const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
+    if (!rowYmd) continue;
+    if (rowYmd < targetYmd) {
       hitOlderDay = true;
       break;
     }
-    if (reportYmd === targetYmd) added++;
+    if (rowYmd > targetYmd) continue;
+    if (rowYmd === targetYmd && tribeConquerRowIsGreenGain($, tds)) added++;
   }
   return { added, hitOlderDay };
 }
 
 async function countTodayConquersViaTribePages(rankingUrl, tribeId, targetYmd, options, maxPages) {
-  const reportTimeZone = options.timezone || 'Europe/Istanbul';
-  const twOff = options.twStatsDisplayedUtcOffsetMinutes;
   let total = 0;
   for (let pn = 1; pn <= maxPages; pn++) {
     try {
       const url = tribeConquersListUrl(rankingUrl, tribeId, pn);
       const html = await fetchHtml(url, { userAgent: options.userAgent });
-      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(
-        html,
-        targetYmd,
-        reportTimeZone,
-        twOff
-      );
+      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(html, targetYmd);
       total += added;
       if (hitOlderDay) break;
     } catch {

@@ -3,7 +3,7 @@
   "schedule": ["12:00", "00:00"],
   "worldLabel": "TR101",
   "requestDelayMs": 800,
-  "twStatsDisplayedUtcOffsetMinutes": 60,
+  "twStatsDisplayedUtcOffsetMinutes": 120,
   "playerConquerStatsDays": 3,
   "maxPlayerConquerPages": 35,
   "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) twstats-telegram-bot/1.0",

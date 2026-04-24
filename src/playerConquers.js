@@ -3,6 +3,7 @@ import { agentLog } from './debugAgentLog.js';
 import {
   conquerReportYmdFromTwCell,
   fetchHtml,
+  resolveTwStatsUtcOffsetMinutes,
   ymdAddCalendarDays,
   ymdInTimeZone,
 } from './scrape.js';
@@ -114,6 +115,7 @@ function parsePlayerConquersPage(
   reportTimeZone,
   twStatsDisplayedUtcOffsetMinutes
 ) {
+  const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
   let $table = null;
   $('table.widget').each((_, el) => {
@@ -155,7 +157,7 @@ function parsePlayerConquersPage(
     const tds = $(tr).find('td').toArray();
     if (tds.length <= dateIdx) continue;
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
-    const reportYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDisplayedUtcOffsetMinutes);
+    const reportYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twOff);
     if (!reportYmd) continue;
     if (reportYmd < minYmd) {
       stopPaging = true;
