@@ -280,8 +280,134 @@ export function parseTribeTopWithIds(html, matchHeaders, maxRows) {
   return { error: null, tribes };
 }
 
-function normTribeTagKey(name) {
+export function normTribeTagKey(name) {
   return normalizeCellText(name).toLocaleLowerCase('tr-TR');
+}
+
+function tribeIdFromOwnerTribeCell($, td) {
+  const $a = $(td).find('a.tribelink').first();
+  if (!$a.length) return null;
+  const href = $a.attr('href') || '';
+  const m = href.match(/[?&]id=(\d+)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Dünya ennoblements: `targetYmd` gününde eski sahibi `victimTribeId` olan fetihlerde,
+ * yeni sahibi `winnerTribeIdSet` içinde olan satırları klan id → adet olarak sayar.
+ * Tarih: TWStats hücresindeki YYYY-MM-DD (klan fetihleriyle aynı mantık).
+ */
+function parseEnnoblementsPageVictimLossesAmongWinners(
+  html,
+  targetYmd,
+  victimTribeId,
+  winnerTribeIdSet
+) {
+  const $ = cheerio.load(html);
+  const $table = findWidgetTable($, ['Village', 'Points', 'Old Owner', 'New Owner', 'Date/Time']);
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  if (!$table) return { counts, hitOlderDay: true };
+
+  const trs = $table.find('tr').toArray();
+  if (trs.length <= 1) return { counts, hitOlderDay: true };
+
+  let hitOlderDay = false;
+  for (let i = 1; i < trs.length; i++) {
+    const tr = trs[i];
+    if ($(tr).find('td.foot').length) continue;
+    const tds = $(tr).find('td').toArray();
+    if (tds.length < 5) continue;
+    const dateRaw = normalizeCellText($(tds[4]).text());
+    const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
+    if (!rowYmd) continue;
+    if (rowYmd < targetYmd) {
+      hitOlderDay = true;
+      break;
+    }
+    if (rowYmd > targetYmd) continue;
+
+    const oldId = tribeIdFromOwnerTribeCell($, tds[2]);
+    const newId = tribeIdFromOwnerTribeCell($, tds[3]);
+    if (!oldId || oldId !== victimTribeId) continue;
+    if (!newId || newId === victimTribeId) continue;
+    if (!winnerTribeIdSet.has(newId)) continue;
+    counts.set(newId, (counts.get(newId) || 0) + 1);
+  }
+  return { counts, hitOlderDay };
+}
+
+/**
+ * Sıralama tablosundan klan etiketi → tribe id (ilk `maxScanRows` satırda arar).
+ */
+export function findTribeInRankingByTag(html, matchHeaders, tagQuery, maxScanRows = 500) {
+  const want = normTribeTagKey(tagQuery);
+  const { error, tribes } = parseTribeTopWithIds(html, matchHeaders, maxScanRows);
+  if (error) return { error, tribe: null };
+  const hit = tribes.find((t) => normTribeTagKey(t.name) === want);
+  if (!hit) return { error: `Klan bulunamadı (ilk ${maxScanRows} sıra içinde): ${tagQuery}`, tribe: null };
+  return { error: null, tribe: hit };
+}
+
+/**
+ * `targetYmd` gününde `victimTribeId` klanından köy alan, sıralamada ilk `topTribeRows` içindeki klanların adetleri.
+ * `rankingHtml` verilirse sıralama sayfası bir kez daha çekilmez.
+ */
+export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeaders, options) {
+  const {
+    targetYmd,
+    victimTribeId,
+    victimName: victimNameOpt,
+    topTribeRows,
+    maxEnnPages = 40,
+    userAgent,
+    delayMs = 0,
+    rankingHtml,
+  } = options;
+
+  const rankHtml = rankingHtml ?? (await fetchHtml(rankingUrl, { userAgent }));
+  const { error, tribes } = parseTribeTopWithIds(rankHtml, matchHeaders, topTribeRows);
+  if (error || !tribes.length) {
+    return { error: error || 'Sıralama boş.', lines: [], victimName: victimNameOpt || '' };
+  }
+
+  const winnerIdSet = new Set(tribes.map((t) => String(t.tribeId)));
+  winnerIdSet.delete(String(victimTribeId));
+
+  const victimMeta = tribes.find((t) => String(t.tribeId) === String(victimTribeId));
+  const victimName = victimNameOpt || victimMeta?.name || `#${victimTribeId}`;
+
+  /** @type {Map<string, number>} */
+  const totals = new Map();
+  let stop = false;
+  for (let pn = 1; pn <= maxEnnPages && !stop; pn++) {
+    try {
+      const url = ennoblementsListUrl(rankingUrl, pn);
+      const html = await fetchHtml(url, { userAgent });
+      const { counts, hitOlderDay } = parseEnnoblementsPageVictimLossesAmongWinners(
+        html,
+        targetYmd,
+        String(victimTribeId),
+        winnerIdSet
+      );
+      for (const [id, n] of counts) totals.set(id, (totals.get(id) || 0) + n);
+      if (hitOlderDay) stop = true;
+    } catch {
+      stop = true;
+    }
+    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+  }
+
+  const idToName = new Map(tribes.map((t) => [String(t.tribeId), t.name]));
+  const lines = [...totals.entries()]
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, n]) => {
+      const tag = idToName.get(String(id)) || `#${id}`;
+      return `${sanitizeForWhatsAppLine(tag)} — ${n} köy`;
+    });
+
+  return { error: null, lines, victimName };
 }
 
 /**

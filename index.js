@@ -1,7 +1,14 @@
 import 'dotenv/config';
 import axios from 'axios';
 import { loadJsonConfig } from './src/loadConfig.js';
-import { collectSources, conquerYmdFromDdMm, ymdYesterdayInTimeZone } from './src/scrape.js';
+import {
+  collectSources,
+  conquerYmdFromDdMm,
+  countTakesFromVictimAmongTopTribes,
+  fetchHtml,
+  findTribeInRankingByTag,
+  ymdYesterdayInTimeZone,
+} from './src/scrape.js';
 import { escapeHtml, formatDigest, formatDigestHtml } from './src/formatMessage.js';
 import { scheduleDigestJobs, scheduleHourlyOnTheHour } from './src/scheduler.js';
 import { alreadySentToday, markSentToday } from './src/dedupe.js';
@@ -197,6 +204,7 @@ function startBot() {
               '',
               '/info — Tam özet (bugünün verisi)',
               '/infoGGAŞ — Belirli günün fetih özeti (GGAŞ: gün+ay, örn. <code>/info2203</code> → 22 Mart)',
+              '/infoGGAŞ klan — O günde sıralamadaki klanların o klandan aldığı köy (örn. <code>/info2404 BOMBAC</code>)',
               '/info.takma — Son N günde günlük + toplam köy (N=<code>playerConquerStatsDays</code>, takma adlar <code>telegramPlayerAliases</code>)',
               '/gunsonu — Dünün fetih özeti (manuel Z raporu)',
               '/plan — Zamanlanmış gönderim saatleri',
@@ -326,6 +334,61 @@ function startBot() {
           const freshCfg = loadJsonConfig();
           const tz = freshCfg.timezone || 'Europe/Istanbul';
           const y = conquerYmdFromDdMm(m[1], tz);
+          const rest = meta.text
+            .trim()
+            .replace(/^\S+\s*/, '')
+            .trim();
+          const victimTag = rest.replace(/^@\S+\s*/i, '').trim();
+
+          if (victimTag) {
+            const tribeSrc = freshCfg.sources?.find((s) => s.type === 'tribe_top_villages_and_today_conquers');
+            const rankingUrl = tribeSrc?.rankingUrl || tribeSrc?.url;
+            const matchHeaders = tribeSrc?.matchHeaders || [
+              'Rank',
+              'Tag',
+              'Points of best 40',
+              'Total Points',
+              'Members',
+              'Average points per member',
+              'Villages',
+              'Average points per village',
+            ];
+            if (!rankingUrl) {
+              throw new Error('config.json: tribe_top_villages_and_today_conquers rankingUrl gerekli.');
+            }
+            const rankHtml = await fetchHtml(rankingUrl, { userAgent: freshCfg.userAgent });
+            const { error: findErr, tribe: victim } = findTribeInRankingByTag(
+              rankHtml,
+              matchHeaders,
+              victimTag,
+              500
+            );
+            if (findErr || !victim) {
+              throw new Error(findErr || 'Klan bulunamadı.');
+            }
+            const topN = tribeSrc?.maxRows ?? 10;
+            const maxEnn = tribeSrc?.maxEnnoblementPages ?? 40;
+            const { error, lines, victimName } = await countTakesFromVictimAmongTopTribes(rankingUrl, matchHeaders, {
+              targetYmd: y,
+              victimTribeId: victim.tribeId,
+              victimName: victim.name,
+              topTribeRows: topN,
+              maxEnnPages: maxEnn,
+              userAgent: freshCfg.userAgent,
+              delayMs: freshCfg.requestDelayMs ?? 0,
+              rankingHtml: rankHtml,
+            });
+            if (error) throw new Error(error);
+            const header = `<b>${escapeHtml(y)}</b> — <b>${escapeHtml(victimName)}</b> köylerini ilk <b>${topN}</b> sıradaki hangi klanlar almış\n<i>(TWStats dünya fetih listesi, tarih sütunu günü)</i>`;
+            const body =
+              lines.length > 0
+                ? lines.map((ln) => escapeHtml(ln)).join('\n')
+                : '<i>O gün için bu sıra aralığında kayıt yok (veya ennoblements sayfa sınırına takıldı).</i>';
+            await sendToChat(cid, `${header}\n\n${body}`);
+            console.log(`[/info${m[1]} ${victimTag}] ${y} → ${lines.length} satır (${cid}).`);
+            return;
+          }
+
           const body = await buildDigestHtml(freshCfg, { conquerDayYmd: y });
           await sendToChat(cid, `<b>Tarihli özet (${escapeHtml(y)})</b>\n\n${body}`);
           console.log(`[/info${m[1]}] ${y} gönderildi (${cid}).`);
