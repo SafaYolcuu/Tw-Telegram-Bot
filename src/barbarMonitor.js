@@ -75,21 +75,36 @@ export async function fetchBarbarVillages(server, userAgent) {
 }
 
 // ── State yönetimi ─────────────────────────────────────────────────────────
+//
+// State koordinat bazlı ve kümülatif saklanır.
+// Bir koordinat bir kez barbar olarak görüldükten sonra sonsuza kadar
+// "bilinen" sayılır — köy el değiştirip tekrar barbarlaşsa bildirim gelmez.
+//
+// Dosya formatı: { "seenCoords": ["629|604", ...] }
 
-/** Önceki taramadaki barbar köy ID'lerini yükler. null → ilk çalıştırma. */
+/** Daha önce barbar olarak görülmüş koordinatları yükler. null → ilk çalıştırma. */
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-    return new Set(Array.isArray(raw) ? raw : []);
+    // Eski format (dizi of number ID'ler) varsa geç: ilk çalıştırma gibi davran
+    if (!raw?.seenCoords) return null;
+    return new Set(raw.seenCoords);
   } catch {
     return null;
   }
 }
 
-/** Mevcut barbar köy ID'lerini diske kaydeder. */
-function saveState(ids) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify([...ids]), 'utf-8');
+/**
+ * Görülmüş koordinatlar kümesini diske kaydeder.
+ * @param {Set<string>} seenCoords
+ */
+function saveState(seenCoords) {
+  fs.writeFileSync(
+    STATE_FILE,
+    JSON.stringify({ seenCoords: [...seenCoords] }),
+    'utf-8'
+  );
 }
 
 // ── Mesaj formatlama ───────────────────────────────────────────────────────
@@ -146,26 +161,29 @@ export async function runBarbarScan({ cfg, sendFn }) {
     return;
   }
 
-  const knownIds  = loadState();
-  const currentIds = new Set(current.keys());
+  // seenCoords: daha önce barbar olarak GÖRÜLMÜŞ koordinatlar kümesi (kümülatif)
+  const seenCoords = loadState();
 
-  if (knownIds === null) {
-    saveState(currentIds);
-    console.log(`[barbar] İlk çalıştırma: ${current.size} barbar köy kaydedildi, bildirim gönderilmedi.`);
+  if (seenCoords === null) {
+    // İlk çalıştırma: mevcut barbarları "bilinen" olarak kaydet, bildirim gönderme
+    const initial = new Set([...current.values()].map((v) => v.coord));
+    saveState(initial);
+    console.log(`[barbar] İlk çalıştırma: ${initial.size} barbar koordinat kaydedildi, bildirim gönderilmedi.`);
     return;
   }
 
-  // Yeni köyleri bul ve filtrele
+  // Koordinatı daha önce hiç görülmemiş olan barbarları bul
   const newBarbs = [];
-  for (const [id, village] of current) {
-    if (knownIds.has(id)) continue;
+  for (const village of current.values()) {
+    if (seenCoords.has(village.coord)) continue;           // zaten bilinen koordinat
     if (watchContinents.length && !watchContinents.includes(village.cont)) continue;
     if (village.pts < minPts || village.pts > maxPts) continue;
     newBarbs.push(village);
+    seenCoords.add(village.coord);  // kümülatif kümeye ekle
   }
 
   const ts = new Date().toISOString();
-  console.log(`[barbar ${ts}] Toplam: ${current.size} barbar | Yeni (filtreli): ${newBarbs.length}`);
+  console.log(`[barbar ${ts}] Toplam barbar: ${current.size} | Yeni koordinat (filtreli): ${newBarbs.length}`);
 
   if (newBarbs.length > 0) {
     const msg = buildMessage(newBarbs, worldLabel, server);
@@ -177,7 +195,8 @@ export async function runBarbarScan({ cfg, sendFn }) {
     }
   }
 
-  saveState(currentIds);
+  // Güncel "görülmüş koordinatlar" kümesini kaydet
+  saveState(seenCoords);
 }
 
 // ── Durum özeti (komut için) ───────────────────────────────────────────────
@@ -203,7 +222,7 @@ export async function getBarbarStatus(cfg) {
     return `<i>Köy verisi alınamadı: ${escHtml(e.message)}</i>`;
   }
 
-  const knownIds = loadState();
+  const seenCoords = loadState();
   const tracked = [...current.values()].filter((v) => {
     if (watchContinents.length && !watchContinents.includes(v.cont)) return false;
     if (v.pts < minPts || v.pts > maxPts) return false;
@@ -220,6 +239,6 @@ export async function getBarbarStatus(cfg) {
     `📍 Kıtalar: ${escHtml(contLabel)}\n` +
     `📊 Puan aralığı: ${minPts}–${maxPts}\n` +
     `🔢 Takip edilen barbar: <b>${tracked.length}</b>\n` +
-    `💾 Son durum: <b>${knownIds === null ? 'henüz kaydedilmedi' : `${knownIds.size} köy`}</b>`
+    `💾 Bilinen koordinat: <b>${seenCoords === null ? 'henüz kaydedilmedi' : `${seenCoords.size} koordinat`}</b>`
   );
 }
