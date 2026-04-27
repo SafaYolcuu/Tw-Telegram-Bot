@@ -24,6 +24,14 @@
     "övünç": "maxel",
     "hasan": "hasan6576"
   },
+  "barbarMonitor": {
+    "enabled": true,
+    "server": "tr101.klanlar.org",
+    "intervalMinutes": 5,
+    "watchContinents": ["55"],
+    "minPoints": 0,
+    "maxPoints": 500
+  },
   "sources": [
     {
       "type": "tribe_top_villages_and_today_conquers",

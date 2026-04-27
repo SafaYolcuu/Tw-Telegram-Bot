@@ -10,12 +10,13 @@ import {
   ymdYesterdayInTimeZone,
 } from './src/scrape.js';
 import { escapeHtml, formatDigest, formatDigestHtml } from './src/formatMessage.js';
-import { scheduleDigestJobs, scheduleHourlyOnTheHour } from './src/scheduler.js';
+import { scheduleDigestJobs, scheduleHourlyOnTheHour, scheduleEveryNMinutes } from './src/scheduler.js';
 import { alreadySentToday, markSentToday } from './src/dedupe.js';
 import { sendViaTelegram } from './src/sendTelegram.js';
 import { startTelegramPolling } from './src/telegramPoll.js';
 import { computeTribeTransfers, persistTribeTransferSnapshot, formatTransferAlertsHtml } from './src/tribeTransfers.js';
 import { agentLog } from './src/debugAgentLog.js';
+import { runBarbarScan, getBarbarStatus } from './src/barbarMonitor.js';
 import {
   countPlayerConquersLastNDays,
   formatPlayerConquersSummaryHtml,
@@ -208,6 +209,7 @@ function startBot() {
               '/info.takma — Son N günde günlük + toplam köy (N=<code>playerConquerStatsDays</code>, takma adlar <code>telegramPlayerAliases</code>)',
               '/gunsonu — Dünün fetih özeti (manuel Z raporu)',
               '/plan — Zamanlanmış gönderim saatleri',
+              '/barbar — Barbar monitörü durumu',
               '/ping — Bot çalışıyor mu?',
               '',
               '/komutlar — Bu listeyi gösterir (aynı: /help, /yardim, /commands)',
@@ -221,6 +223,16 @@ function startBot() {
         match: /^\/ping(?:@\w+)?$/i,
         async run(cid) {
           await sendToChat(cid, '<b>OK</b>\nBot çalışıyor.');
+        },
+      },
+      {
+        match: /^\/barbar(?:@\w+)?$/i,
+        heavy: true,
+        loadingHtml: '<i>Barbar verisi alınıyor…</i>',
+        async run(cid) {
+          const freshCfg = loadJsonConfig();
+          const text = await getBarbarStatus(freshCfg);
+          await sendToChat(cid, text);
         },
       },
       {
@@ -423,17 +435,34 @@ function startBot() {
       })
     : () => {};
 
+  // ── Barbar Monitörü ──────────────────────────────────────────────────────
+  const barbarOn = cfg.barbarMonitor?.enabled === true;
+  const barbarIntervalMin = cfg.barbarMonitor?.intervalMinutes ?? 5;
+  const stopBarbar = barbarOn
+    ? scheduleEveryNMinutes({
+        n: barbarIntervalMin,
+        timezone: cfg.timezone,
+        onTick: () => runBarbarScan({ cfg: loadJsonConfig(), sendFn: sendText }),
+      })
+    : () => {};
+
   console.log(`Telegram. chat_id: ${chatId}. Özet (${cfg.timezone}): ${cfg.schedule.join(', ')}`);
   console.log('Telegram: /komutlar veya /help (yalnızca bu chat_id).');
   if (transfersOn) {
     console.log(`Klan üye taraması: her saat başı (${cfg.timezone})`);
     runTransferScan(cfg, sendText).catch((e) => console.error('Başlangıç klan taraması:', e));
   }
+  if (barbarOn) {
+    const conts = (cfg.barbarMonitor?.watchContinents ?? []).map((c) => `K${c}`).join(', ') || 'Tümü';
+    console.log(`Barbar monitörü: her ${barbarIntervalMin} dk — kıtalar: ${conts}`);
+    runBarbarScan({ cfg, sendFn: sendText }).catch((e) => console.error('Başlangıç barbar taraması:', e));
+  }
 
   process.on('SIGINT', () => {
     stopPoll();
     stopDigest();
     stopHourly();
+    stopBarbar();
     process.exit(0);
   });
 }

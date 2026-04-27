@@ -40,3 +40,18 @@ export function scheduleHourlyOnTheHour({ timezone, onTick }) {
   task.start();
   return () => task.stop();
 }
+
+/** Her N dakikada bir — örn. n=5 → `*\/5 * * * *` */
+export function scheduleEveryNMinutes({ n, timezone, onTick }) {
+  const expr = `*/${Math.max(1, Math.floor(n))} * * * *`;
+  if (!cron.validate(expr)) throw new Error(`${n} dakikalık cron doğrulanamadı: ${expr}`);
+  const task = cron.schedule(
+    expr,
+    () => {
+      Promise.resolve(onTick()).catch((e) => console.error(`Her-${n}dk görev hatası:`, e));
+    },
+    { timezone, scheduled: false }
+  );
+  task.start();
+  return () => task.stop();
+}

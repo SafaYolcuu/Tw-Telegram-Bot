@@ -8,3 +8,4 @@ id_rsa.pub
 *.key
 last-sent.json
 tribe-transfer-snapshot.json
+barbar-state.json
