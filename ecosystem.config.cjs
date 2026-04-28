@@ -1,4 +1,21 @@
 /** PM2: `pm2 start ecosystem.config.cjs` — çalışma dizini bu klasör olmalı. */
+/** Windows: PATH'te genelde `py` var, `python` yok — barbar monitör için `py -3` kullanılır. */
+
+const isWin = process.platform === 'win32';
+
+const barbarMonitor = {
+  name: 'tw-barbar-monitor',
+  script: 'scripts/tw_barbar_monitor.py',
+  cwd: __dirname,
+  instances: 1,
+  autorestart: true,
+  watch: false,
+  max_memory_restart: '150M',
+  ...(isWin
+    ? { interpreter: 'py', interpreter_args: '-3' }
+    : { interpreter: 'python' }),
+};
+
 module.exports = {
   apps: [
     {
@@ -13,15 +30,6 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
-    {
-      name: 'tw-barbar-monitor',
-      script: 'scripts/tw_barbar_monitor.py',
-      cwd: __dirname,
-      interpreter: 'python',
-      instances: 1,
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '150M',
-    },
+    barbarMonitor,
   ],
 };
