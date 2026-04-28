@@ -84,7 +84,26 @@ npm ci --omit=dev
 pm2 restart ecosystem.config.cjs
 ```
 
+Veya repodaki kısayol:
+
+```cmd
+cd /d C:\path\to\Tw-Telegram-Bot
+scripts\update-server.cmd
+```
+
 Python barbar monitörü için bir kez: `py -m pip install requests`. Token/chat ve ayarlar `scripts/tw_barbar_monitor.py` içinde (`.env` ile bağlamak isterseniz scripti kendiniz genişletebilirsiniz).
+
+**İlk PM2 başlatma** (hem Node bot hem Python monitör):
+
+```cmd
+cd /d C:\path\to\Tw-Telegram-Bot
+npm ci --omit=dev
+py -m pip install requests
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+Sunucuda `python` çalışmıyorsa PM2 için `interpreter`'ı `py` olarak `ecosystem.config.cjs` içinde düzenleyin veya PATH'e `python.exe` ekleyin.
 
 Yerel npm script (Linux/macOS, sunucuda):
 
