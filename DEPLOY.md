@@ -64,18 +64,27 @@ sudo systemctl enable --now twstats-bot
 
 ## 3) Her kod güncellemesinde
 
-Sunucuda:
+**Repoyu kullanın:** [Tw-Telegram-Bot](https://github.com/SafaYolcuu/Tw-Telegram-Bot) — kök dizinde `package.json` ve `ecosystem.config.cjs` olmalı.
+
+Sunucuda (Linux):
 
 ```bash
-cd /opt/yyeni/twstats-whatsapp-bot
+cd /path/to/Tw-Telegram-Bot
 bash scripts/update-server.sh
 ```
 
-Veya tek satır (PM2 + monorepo kökü `/opt/yyeni` ise script bunu algılar):
+Script `git pull`, `npm ci` ve **PM2 ile `ecosystem.config.cjs` içindeki tüm süreçleri** (TW Stats bot + isteğe bağlı `tw-barbar-monitor`) yeniden başlatır.
 
-```bash
-bash /opt/yyeni/twstats-whatsapp-bot/scripts/update-server.sh
+**Windows sunucu (CMD, yönetici gerekmez):**
+
+```cmd
+cd /d C:\path\to\Tw-Telegram-Bot
+git pull origin main
+npm ci --omit=dev
+pm2 restart ecosystem.config.cjs
 ```
+
+Python barbar monitörü için bir kez: `py -m pip install requests`. Token/chat ve ayarlar `scripts/tw_barbar_monitor.py` içinde (`.env` ile bağlamak isterseniz scripti kendiniz genişletebilirsiniz).
 
 Yerel npm script (Linux/macOS, sunucuda):
 

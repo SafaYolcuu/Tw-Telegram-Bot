@@ -13,5 +13,15 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    {
+      name: 'tw-barbar-monitor',
+      script: 'scripts/tw_barbar_monitor.py',
+      cwd: __dirname,
+      interpreter: 'python',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '150M',
+    },
   ],
 };

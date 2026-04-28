@@ -27,11 +27,11 @@ npm ci --omit=dev
 
 if command -v pm2 >/dev/null 2>&1; then
   if [ -f "$INSTALL_DIR/ecosystem.config.cjs" ]; then
-    pm2 restart "$INSTALL_DIR/ecosystem.config.cjs" --only twstats-bot
+    pm2 restart "$INSTALL_DIR/ecosystem.config.cjs"
   else
     pm2 restart twstats-bot
   fi
-  echo "PM2 yeniden başlatıldı."
+  echo "PM2 yeniden başlatıldı (ecosystem içindeki tüm uygulamalar)."
 else
   echo "Uyarı: pm2 bulunamadı; süreci elle yeniden başlatın (systemd veya node)." >&2
 fi
