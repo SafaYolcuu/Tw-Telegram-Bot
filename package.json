@@ -12,6 +12,7 @@
     "send-test": "node index.js --send-test",
     "dry-run": "node index.js --dry-run",
     "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:barbar-python": "pm2 start ecosystem.barbar-python.cjs",
     "pm2:restart": "pm2 restart ecosystem.config.cjs",
     "update:server": "bash scripts/update-server.sh"
   },

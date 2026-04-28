@@ -73,9 +73,9 @@ cd /path/to/Tw-Telegram-Bot
 bash scripts/update-server.sh
 ```
 
-Script `git pull`, `npm ci` ve **PM2 ile `ecosystem.config.cjs` içindeki tüm süreçleri** (TW Stats bot + isteğe bağlı `tw-barbar-monitor`) yeniden başlatır.
+Script `git pull`, `npm ci` ve **PM2 ile `twstats-bot`** sürecini yeniden başlatır (`ecosystem.config.cjs` yalnızca Node içerir — **Python sunucuda olmak zorunda değil**).
 
-**Windows sunucu (CMD, yönetici gerekmez):**
+**Windows sunucu (CMD):**
 
 ```cmd
 cd /d C:\path\to\Tw-Telegram-Bot
@@ -84,26 +84,34 @@ npm ci --omit=dev
 pm2 restart ecosystem.config.cjs
 ```
 
-Veya repodaki kısayol:
+Veya:
 
 ```cmd
 cd /d C:\path\to\Tw-Telegram-Bot
 scripts\update-server.cmd
 ```
 
-Python barbar monitörü için bir kez: `py -3 -m pip install requests`. Token/chat ve ayarlar `scripts/tw_barbar_monitor.py` içinde (`.env` ile bağlamak isterseniz scripti kendiniz genişletebilirsiniz).
+### Barbar köy bildirimi (iki seçenek — birini kullanın)
 
-**İlk kez PM2 başlatma** (hem Node bot hem Python monitör):
+1. **Node (önerilen):** `config.json` içinde `"barbarMonitor": { "enabled": true, ... }` — Python gerekmez; veri kaynağı yine `village.txt.gz`.
+
+2. **Python (isteğe bağlı):** Sunucuya [Python 3](https://www.python.org/downloads/windows/) kurun; `py -3 -m pip install requests`; token/chat `scripts/tw_barbar_monitor.py` içinde. Başlatma:
+
+   ```cmd
+   pm2 start ecosystem.barbar-python.cjs
+   pm2 save
+   ```
+
+   İkisini birden açmayın (çift bildirim olur).
+
+**İlk kez yalnızca Node bot:**
 
 ```cmd
 cd /d C:\path\to\Tw-Telegram-Bot
 npm ci --omit=dev
-py -3 -m pip install requests
 pm2 start ecosystem.config.cjs
 pm2 save
 ```
-
-`ecosystem.config.cjs` Windows’ta Python için **`py -3`** kullanır (PATH’te `python` olmasa da çalışır). Sadece Node bot istiyorsanız: `pm2 start ecosystem.config.cjs --only twstats-bot` veya `ecosystem` dosyasından `tw-barbar-monitor` bölümünü geçici kaldırın.
 
 Yerel npm script (Linux/macOS, sunucuda):
 
