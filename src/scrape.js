@@ -101,14 +101,45 @@ function extractDataRows($, $table, maxRows) {
   return rows;
 }
 
+/** Cloudflare vb. için tarayıcıya yakın istek başlıkları (403 riskini azaltır). */
+function browserLikeHeaders(url, userAgent) {
+  let origin = '';
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    /* ignore */
+  }
+  const ua =
+    userAgent ||
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  return {
+    'User-Agent': ua,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    ...(origin
+      ? {
+          Referer: `${origin}/`,
+          Origin: origin,
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'same-origin',
+          'Sec-Fetch-User': '?1',
+          'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+        }
+      : {}),
+  };
+}
+
 export async function fetchHtml(url, options = {}) {
-  const { userAgent, timeoutMs = 25000 } = options;
+  const { userAgent, timeoutMs = 55000 } = options;
   const res = await axios.get(url, {
     timeout: timeoutMs,
-    headers: {
-      'User-Agent': userAgent || 'twstats-telegram-bot/1.0',
-      Accept: 'text/html,application/xhtml+xml',
-    },
+    headers: browserLikeHeaders(url, userAgent),
     maxRedirects: 5,
     validateStatus: (s) => s >= 200 && s < 400,
   });
