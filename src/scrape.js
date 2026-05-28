@@ -1,6 +1,9 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 function normalizeCellText(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -47,14 +50,95 @@ function headersMatch(found, expected) {
  * @param {string[]} matchHeaders
  */
 function findWidgetTable($, matchHeaders) {
-  const tables = $('table.widget').toArray();
-  for (const table of tables) {
-    const $table = $(table);
-    const firstRow = $table.find('tr').first();
-    const h = headerTexts($, firstRow);
-    if (headersMatch(h, matchHeaders)) return $table;
+  for (const sel of ['table.widget', 'table.vis', 'table']) {
+    for (const table of $(sel).toArray()) {
+      const $table = $(table);
+      const firstRow = $table.find('tr').first();
+      const h = headerTexts($, firstRow);
+      if (headersMatch(h, matchHeaders)) return $table;
+    }
   }
   return null;
+}
+
+function tableHeaderTexts($, $table) {
+  return $table
+    .find('tr')
+    .first()
+    .find('th')
+    .map((_, th) => normalizeCellText($(th).text()))
+    .get();
+}
+
+function findTribeConquerTable($) {
+  for (const sel of ['table.widget', 'table.vis', 'table']) {
+    for (const table of $(sel).toArray()) {
+      const $t = $(table);
+      const ths = tableHeaderTexts($, $t);
+      const hasV = ths.some((x) => /^village$/i.test(x));
+      const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
+      const hasOld = ths.some((x) => /^old owner$/i.test(x));
+      const hasNew = ths.some((x) => /^new owner$/i.test(x));
+      if (hasV && hasDt && hasOld && hasNew) return $t;
+    }
+  }
+  return null;
+}
+
+function findEnnoblementsTable($) {
+  for (const sel of ['table.widget', 'table.vis', 'table']) {
+    for (const table of $(sel).toArray()) {
+      const $t = $(table);
+      const ths = tableHeaderTexts($, $t);
+      const hasV = ths.some((x) => /^village$/i.test(x));
+      const hasOld = ths.some((x) => /^old owner$/i.test(x));
+      const hasNew = ths.some((x) => /^new owner$/i.test(x));
+      const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
+      if (hasV && hasOld && hasNew && hasDt) return $t;
+    }
+  }
+  return null;
+}
+
+function buildFetchHeaders(userAgent) {
+  return {
+    'User-Agent': (userAgent && String(userAgent).trim()) || DEFAULT_USER_AGENT,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  };
+}
+
+/** TWStats yanıtının bot tarafından okunabilir olup olmadığını kontrol eder. */
+export function diagnoseTwStatsHtml(html) {
+  const s = String(html || '');
+  if (!s.trim()) return { ok: false, reason: 'TWStats boş yanıt döndü' };
+  if (/502 bad gateway|bad gateway/i.test(s)) {
+    return { ok: false, reason: 'TWStats 502 Bad Gateway (site geçici kapalı)' };
+  }
+  if (/503 service unavailable|service unavailable/i.test(s)) {
+    return { ok: false, reason: 'TWStats 503 — geçici olarak kapalı' };
+  }
+  const $ = cheerio.load(s);
+  if ($('a[href*="page=tribe"]').length > 0 || findTribeConquerTable($) != null) {
+    return { ok: true, reason: null };
+  }
+  if (
+    /challenge-platform|Just a moment|cf-browser-verification|Enable JavaScript and cookies to continue/i.test(
+      s
+    )
+  ) {
+    return {
+      ok: false,
+      reason:
+        'TWStats Cloudflare doğrulaması — sunucu IP’si engellenmiş olabilir (tarayıcıda açılır, bot alamaz)',
+    };
+  }
+  if (s.length < 12000) {
+    return { ok: false, reason: 'TWStats yanıtında tablo yok (HTML çok kısa veya farklı sayfa)' };
+  }
+  return { ok: false, reason: 'TWStats yanıtında beklenen tablo bulunamadı' };
 }
 
 /** `table.widget` veya `table.vis` içinde başlık eşleşeni bulur (tam sıralama sayfası için). */
@@ -101,48 +185,27 @@ function extractDataRows($, $table, maxRows) {
   return rows;
 }
 
-/** Cloudflare vb. için tarayıcıya yakın istek başlıkları (403 riskini azaltır). */
-function browserLikeHeaders(url, userAgent) {
-  let origin = '';
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    /* ignore */
-  }
-  const ua =
-    userAgent ||
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-  return {
-    'User-Agent': ua,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-    'Upgrade-Insecure-Requests': '1',
-    ...(origin
-      ? {
-          Referer: `${origin}/`,
-          Origin: origin,
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'same-origin',
-          'Sec-Fetch-User': '?1',
-          'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-        }
-      : {}),
-  };
-}
-
 export async function fetchHtml(url, options = {}) {
-  const { userAgent, timeoutMs = 55000 } = options;
-  const res = await axios.get(url, {
-    timeout: timeoutMs,
-    headers: browserLikeHeaders(url, userAgent),
-    maxRedirects: 5,
-    validateStatus: (s) => s >= 200 && s < 400,
-  });
+  const { userAgent, timeoutMs = 25000 } = options;
+  let res;
+  try {
+    res = await axios.get(url, {
+      timeout: timeoutMs,
+      headers: buildFetchHeaders(userAgent),
+      maxRedirects: 5,
+      validateStatus: () => true,
+      responseType: 'text',
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`TWStats isteği başarısız (${url}): ${msg}`);
+  }
+  if (res.status >= 400) {
+    throw new Error(`TWStats HTTP ${res.status} (${url})`);
+  }
+  if (typeof res.data !== 'string') {
+    throw new Error(`TWStats beklenmeyen yanıt tipi (${url})`);
+  }
   return res.data;
 }
 
@@ -323,10 +386,38 @@ function tribeIdFromOwnerTribeCell($, td) {
   return m ? m[1] : null;
 }
 
-function tribeConquerRowIsRedLoss($, tds) {
-  if (!tds.length) return false;
+function tribeConquerIconKind($, tds) {
+  if (!tds.length) return 'unknown';
   const src = ($(tds[0]).find('img').first().attr('src') || '').toLowerCase();
-  return src.includes('red.png');
+  if (src.includes('green.png')) return 'gain';
+  if (src.includes('red.png')) return 'loss';
+  return 'none';
+}
+
+function tribeConquerRowIsRedLoss($, tds, tribeId, oldIdx, newIdx) {
+  const kind = tribeConquerIconKind($, tds);
+  if (kind === 'loss') return true;
+  if (kind === 'gain') return false;
+  if (tribeId == null || oldIdx == null || newIdx == null) return false;
+  const tid = String(tribeId);
+  const oldId = tribeIdFromOwnerTribeCell($, tds[oldIdx]);
+  const newId = tribeIdFromOwnerTribeCell($, tds[newIdx]);
+  return oldId === tid && newId !== tid;
+}
+
+function tribeConquerRowIsGreenGain($, tds, tribeId, oldIdx, newIdx) {
+  if (!tds.length) return false;
+  const kind = tribeConquerIconKind($, tds);
+  if (kind === 'gain') return true;
+  if (kind === 'loss') return false;
+  if (tribeId == null || oldIdx == null || newIdx == null) return false;
+  if (tribeConquerRowIsRedLoss($, tds, tribeId, oldIdx, newIdx)) return false;
+  const tid = String(tribeId);
+  const oldId = tribeIdFromOwnerTribeCell($, tds[oldIdx]);
+  const newId = tribeIdFromOwnerTribeCell($, tds[newIdx]);
+  if (newId === tid && oldId !== tid) return true;
+  if (oldId !== tid && $(tds[newIdx]).find('a.playerlink').length > 0) return true;
+  return false;
 }
 
 /**
@@ -340,34 +431,12 @@ function parseTribeConquersPageRedLossesAmongWinners(
   winnerTribeIdSet
 ) {
   const $ = cheerio.load(html);
-  let $table = null;
-  $('table.widget').each((_, el) => {
-    const $t = $(el);
-    const ths = $t
-      .find('tr')
-      .first()
-      .find('th')
-      .map((_, th) => normalizeCellText($(th).text()))
-      .get();
-    const hasV = ths.some((x) => /^village$/i.test(x));
-    const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
-    const hasOld = ths.some((x) => /^old owner$/i.test(x));
-    const hasNew = ths.some((x) => /^new owner$/i.test(x));
-    if (hasV && hasDt && hasOld && hasNew) {
-      $table = $t;
-      return false;
-    }
-  });
+  const $table = findTribeConquerTable($);
   /** @type {Map<string, number>} */
   const counts = new Map();
   if (!$table || !$table.length) return { counts, hitOlderDay: true };
 
-  const ths = $table
-    .find('tr')
-    .first()
-    .find('th')
-    .map((_, th) => normalizeCellText($(th).text()))
-    .get();
+  const ths = tableHeaderTexts($, $table);
   const dateIdx = ths.findIndex((t) => /date/i.test(t) && /time/i.test(t));
   const oldIdx = ths.findIndex((t) => /^old owner$/i.test(t));
   const newIdx = ths.findIndex((t) => /^new owner$/i.test(t));
@@ -383,7 +452,7 @@ function parseTribeConquersPageRedLossesAmongWinners(
     if ($(tr).find('td.foot').length) continue;
     const tds = $(tr).find('td').toArray();
     if (tds.length <= Math.max(dateIdx, oldIdx, newIdx)) continue;
-    if (!tribeConquerRowIsRedLoss($, tds)) continue;
+    if (!tribeConquerRowIsRedLoss($, tds, victimTribeId, oldIdx, newIdx)) continue;
 
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
     const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
@@ -556,12 +625,12 @@ function overlayTribePointsAndVillagesFromGuest(tribes, guestRows) {
 function parseEnnoblementsPageForToday(html, targetYmd, reportTimeZone, twStatsDisplayedUtcOffsetMinutes) {
   const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
-  const $table = findWidgetTable($, ['Village', 'Points', 'Old Owner', 'New Owner', 'Date/Time']);
+  const $table = findEnnoblementsTable($);
   const counts = new Map();
-  if (!$table) return { counts, hitOlderDay: true };
+  if (!$table) return { counts, hitOlderDay: true, tableFound: false };
 
   const trs = $table.find('tr').toArray();
-  if (trs.length <= 1) return { counts, hitOlderDay: true };
+  if (trs.length <= 1) return { counts, hitOlderDay: true, tableFound: true };
 
   let hitOlderDay = false;
   for (let i = 1; i < trs.length; i++) {
@@ -586,7 +655,7 @@ function parseEnnoblementsPageForToday(html, targetYmd, reportTimeZone, twStatsD
     if (!tribeId) continue;
     counts.set(tribeId, (counts.get(tribeId) || 0) + 1);
   }
-  return { counts, hitOlderDay };
+  return { counts, hitOlderDay, tableFound: true };
 }
 
 function ennoblementsListUrl(rankingUrl, pageNum) {
@@ -610,52 +679,22 @@ function tribeConquersListUrl(rankingUrl, tribeId, pageNum) {
 }
 
 /**
- * TWStats klan fetih tablosunda ilk hücredeki ikon: yeşil = klanın aldığı köy, kırmızı = kayıp, sarı = iç transfer vb.
- * «Alınan köy» sayımı yalnızca yeşil satırlarla uyumlu olmalı (aksi halde kırmızılar da eklenir).
+ * TWStats klan fetih tablosunda ilk hücredeki ikon: yeşil = alım, kırmızı = kayıp.
+ * İkon yoksa (TWStats güncellemesi) Old/New Owner tribelink ile ayırt edilir.
  */
-function tribeConquerRowIsGreenGain($, tds) {
-  if (!tds.length) return false;
-  const src = ($(tds[0]).find('img').first().attr('src') || '').toLowerCase();
-  return src.includes('green.png');
-}
-
-/**
- * Klan «conquers» sayfasındaki tablo (Village … Date/Time); hedef güne denk gelen **yeşil (alım)** satırlarını sayar.
- * Gün eşlemesi: hücredeki `YYYY-MM-DD` (TWStats’ın CEST/CET takvimi); `conquerReportYmdFromTwCell` kullanılmaz.
- */
-function parseTribeConquersWidgetForToday(html, targetYmd) {
+function parseTribeConquersWidgetForToday(html, targetYmd, tribeId) {
   const $ = cheerio.load(html);
-  let $table = null;
-  $('table.widget').each((_, el) => {
-    const $t = $(el);
-    const ths = $t
-      .find('tr')
-      .first()
-      .find('th')
-      .map((_, th) => normalizeCellText($(th).text()))
-      .get();
-    const hasV = ths.some((x) => /^village$/i.test(x));
-    const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
-    const hasOld = ths.some((x) => /^old owner$/i.test(x));
-    const hasNew = ths.some((x) => /^new owner$/i.test(x));
-    if (hasV && hasDt && hasOld && hasNew) {
-      $table = $t;
-      return false;
-    }
-  });
-  if (!$table || !$table.length) return { added: 0, hitOlderDay: true };
+  const $table = findTribeConquerTable($);
+  if (!$table || !$table.length) return { added: 0, hitOlderDay: true, tableFound: false };
 
-  const ths = $table
-    .find('tr')
-    .first()
-    .find('th')
-    .map((_, th) => normalizeCellText($(th).text()))
-    .get();
+  const ths = tableHeaderTexts($, $table);
   const dateIdx = ths.findIndex((t) => /date/i.test(t) && /time/i.test(t));
-  if (dateIdx < 0) return { added: 0, hitOlderDay: true };
+  const oldIdx = ths.findIndex((t) => /^old owner$/i.test(t));
+  const newIdx = ths.findIndex((t) => /^new owner$/i.test(t));
+  if (dateIdx < 0 || oldIdx < 0 || newIdx < 0) return { added: 0, hitOlderDay: true, tableFound: true };
 
   const trs = $table.find('tr').toArray();
-  if (trs.length <= 1) return { added: 0, hitOlderDay: true };
+  if (trs.length <= 1) return { added: 0, hitOlderDay: true, tableFound: true };
 
   let added = 0;
   let hitOlderDay = false;
@@ -672,26 +711,38 @@ function parseTribeConquersWidgetForToday(html, targetYmd) {
       break;
     }
     if (rowYmd > targetYmd) continue;
-    if (rowYmd === targetYmd && tribeConquerRowIsGreenGain($, tds)) added++;
+    if (rowYmd === targetYmd && tribeConquerRowIsGreenGain($, tds, tribeId, oldIdx, newIdx)) added++;
   }
-  return { added, hitOlderDay };
+  return { added, hitOlderDay, tableFound: true };
 }
 
 async function countTodayConquersViaTribePages(rankingUrl, tribeId, targetYmd, options, maxPages) {
   let total = 0;
+  let error = null;
   for (let pn = 1; pn <= maxPages; pn++) {
     try {
       const url = tribeConquersListUrl(rankingUrl, tribeId, pn);
       const html = await fetchHtml(url, { userAgent: options.userAgent });
-      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(html, targetYmd);
+      if (pn === 1) {
+        const diag = diagnoseTwStatsHtml(html);
+        const probe = parseTribeConquersWidgetForToday(html, targetYmd, tribeId);
+        if (!probe.tableFound) {
+          error = diag.ok
+            ? 'Fetih tablosu bulunamadı (TWStats HTML yapısı değişmiş olabilir)'
+            : diag.reason || 'TWStats fetih tablosu okunamadı';
+          break;
+        }
+      }
+      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(html, targetYmd, tribeId);
       total += added;
       if (hitOlderDay) break;
-    } catch {
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
       break;
     }
     if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));
   }
-  return total;
+  return { total, error };
 }
 
 /**
@@ -729,16 +780,18 @@ async function collectTribeTopVillagesAndTodayConquers(src, options) {
 
   try {
     const rankHtml = await fetchHtml(rankingUrl, { userAgent: options.userAgent });
+    const rankDiag = diagnoseTwStatsHtml(rankHtml);
     const { error, tribes } = parseTribeTopWithIds(rankHtml, matchHeaders, maxRows);
     if (error) {
+      const rankErr = !rankDiag.ok ? `${error} — ${rankDiag.reason}` : error;
       return [
-        { title: topTitle, url: rankingUrl, error, lines: [] },
+        { title: topTitle, url: rankingUrl, error: rankErr, lines: [] },
         {
           title: conqTitle,
           url: tribes[0]
             ? tribeConquersListUrl(rankingUrl, tribes[0].tribeId, 1)
             : ennoblementsListUrl(rankingUrl, 1),
-          error,
+          error: rankErr,
           lines: [],
         },
       ];
@@ -769,12 +822,23 @@ async function collectTribeTopVillagesAndTodayConquers(src, options) {
     ]);
 
     const countsByTribe = new Map();
+    let conquerFetchError = null;
     if (todayMethod === 'world_ennoblements') {
       let stop = false;
       for (let pn = 1; pn <= maxEnnPages && !stop; pn++) {
         try {
           const url = ennoblementsListUrl(rankingUrl, pn);
           const html = await fetchHtml(url, { userAgent: options.userAgent });
+          if (pn === 1) {
+            const diag = diagnoseTwStatsHtml(html);
+            const probe = parseEnnoblementsPageForToday(html, conquerYmd, tz, twOff);
+            if (!probe.tableFound) {
+              conquerFetchError = diag.ok
+                ? 'Ennoblements tablosu bulunamadı'
+                : diag.reason || 'TWStats ennoblements okunamadı';
+              break;
+            }
+          }
           const { counts, hitOlderDay } = parseEnnoblementsPageForToday(
             html,
             conquerYmd,
@@ -783,19 +847,27 @@ async function collectTribeTopVillagesAndTodayConquers(src, options) {
           );
           for (const [id, n] of counts) countsByTribe.set(id, (countsByTribe.get(id) || 0) + n);
           if (hitOlderDay) stop = true;
-        } catch {
+        } catch (e) {
+          conquerFetchError = e instanceof Error ? e.message : String(e);
           stop = true;
         }
         if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));
       }
     } else {
       for (const t of tribes) {
-        const c = await countTodayConquersViaTribePages(rankingUrl, t.tribeId, conquerYmd, {
-          ...options,
-          timezone: tz,
-          twStatsDisplayedUtcOffsetMinutes: twOff,
-        }, maxTribeConqPages);
-        countsByTribe.set(t.tribeId, c);
+        const { total, error: tribeErr } = await countTodayConquersViaTribePages(
+          rankingUrl,
+          t.tribeId,
+          conquerYmd,
+          {
+            ...options,
+            timezone: tz,
+            twStatsDisplayedUtcOffsetMinutes: twOff,
+          },
+          maxTribeConqPages
+        );
+        countsByTribe.set(t.tribeId, total);
+        if (tribeErr && !conquerFetchError) conquerFetchError = tribeErr;
       }
     }
 
@@ -823,7 +895,7 @@ async function collectTribeTopVillagesAndTodayConquers(src, options) {
       {
         title: conqTitle,
         url: conqExampleUrl,
-        error: null,
+        error: conquerFetchError,
         lines: linesConquers,
         headers: headersConquers,
         rows: rowsConquers,

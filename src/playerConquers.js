@@ -118,22 +118,25 @@ function parsePlayerConquersPage(
   const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
   let $table = null;
-  $('table.widget').each((_, el) => {
-    const $t = $(el);
-    const ths = $t
-      .find('tr')
-      .first()
-      .find('th')
-      .map((_, th) => normalizeCellText($(th).text()))
-      .get();
-    const hasV = ths.some((x) => /^village$/i.test(x));
-    const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
-    const hasNew = ths.some((x) => /^new owner$/i.test(x));
-    if (hasV && hasDt && hasNew) {
-      $table = $t;
-      return false;
+  for (const sel of ['table.widget', 'table.vis', 'table']) {
+    for (const el of $(sel).toArray()) {
+      const $t = $(el);
+      const ths = $t
+        .find('tr')
+        .first()
+        .find('th')
+        .map((_, th) => normalizeCellText($(th).text()))
+        .get();
+      const hasV = ths.some((x) => /^village$/i.test(x));
+      const hasDt = ths.some((x) => /date/i.test(x) && /time/i.test(x));
+      const hasNew = ths.some((x) => /^new owner$/i.test(x));
+      if (hasV && hasDt && hasNew) {
+        $table = $t;
+        break;
+      }
     }
-  });
+    if ($table) break;
+  }
   if (!$table || !$table.length) return { byDay: {}, stopPaging: true };
 
   const ths = $table

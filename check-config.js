@@ -2,6 +2,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { diagnoseTwStatsHtml, fetchHtml } from './src/scrape.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 let failed = false;
@@ -37,5 +38,18 @@ if (!tok) bad('.env: TELEGRAM_BOT_TOKEN boş (BotFather token).');
 else good('TELEGRAM_BOT_TOKEN dolu');
 if (!cid) bad('.env: TELEGRAM_CHAT_ID boş (npm run telegram-updates ile bulun).');
 else good('TELEGRAM_CHAT_ID dolu');
+
+const cfgJson = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : null;
+const tribeSrc = cfgJson?.sources?.find((s) => s.type === 'tribe_top_villages_and_today_conquers');
+if (tribeSrc?.rankingUrl) {
+  try {
+    const html = await fetchHtml(tribeSrc.rankingUrl, { userAgent: cfgJson.userAgent });
+    const diag = diagnoseTwStatsHtml(html);
+    if (diag.ok) good(`TWStats erişilebilir (${html.length} byte)`);
+    else bad(`TWStats: ${diag.reason}`);
+  } catch (e) {
+    bad(`TWStats isteği: ${e instanceof Error ? e.message : e}`);
+  }
+}
 
 process.exit(failed ? 1 : 0);
