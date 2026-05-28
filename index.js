@@ -389,6 +389,8 @@ function startBot() {
               userAgent: freshCfg.userAgent,
               delayMs: freshCfg.requestDelayMs ?? 0,
               rankingHtml: rankHtml,
+              timezone: tz,
+              twStatsDisplayedUtcOffsetMinutes: freshCfg.twStatsDisplayedUtcOffsetMinutes,
             });
             if (error) throw new Error(error);
             const header = `<b>${escapeHtml(y)}</b> — <b>${escapeHtml(victimName)}</b> köylerini ilk <b>${topN}</b> sıradaki hangi klanlar almış\n<i>(TWStats klan fetih sayfası — kırmızı/kayıp satırlar, tarih sütunu günü)</i>`;

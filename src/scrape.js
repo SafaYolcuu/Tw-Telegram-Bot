@@ -230,8 +230,8 @@ export function ymdInTimeZone(timeZone, when = new Date()) {
 }
 
 /**
- * TWStats fetih «Date/Time» hücresinin takvim günü: ilk `YYYY-MM-DD` parçası (sitedeki CEST/CET günü).
- * Klan fetih (`tribe_pages`) sayımı bunu kullanır; İstanbul’a çevirmek 24↔25 gibi sapmalara yol açar.
+ * TWStats fetih «Date/Time» hücresindeki ham `YYYY-MM-DD` (saat yok sayılır).
+ * Klan günlük sayımında kullanmayın — gece yarısı civarı fetihler TR gününe kayar; `conquerReportYmdFromTwCell` kullanın.
  */
 export function twStatsConquerCellLocalYmd(dateRaw) {
   const trimmed = String(dateRaw).replace(/\s+/g, ' ').trim();
@@ -241,8 +241,8 @@ export function twStatsConquerCellLocalYmd(dateRaw) {
 }
 
 /**
- * TWStats «Date / Time» hücresini `reportTimeZone` takvim gününe çevirir (oyuncu fetihleri, dünya ennoblements).
- * `twStatsDisplayedUtcOffsetMinutes`: TW’de görünen saatin UTC’den farkı (dakika, doğuya pozitif). Örn. kış CET = 60, yaz CEST = 120.
+ * TWStats «Date / Time» hücresini `reportTimeZone` takvim gününe çevirir (klan fetihleri, oyuncu fetihleri, ennoblements).
+ * `twStatsDisplayedUtcOffsetMinutes`: TW’de görünen saatin UTC’den farkı (dakika, doğuya pozitif). Örn. kış CET = 60, yaz CEST = 120 (TR UTC+3 → ~1 saat fark yazın).
  * Verilmezse yalnızca YYYY-MM-DD ilk parça kullanılır.
  */
 export function conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twStatsDisplayedUtcOffsetMinutes) {
@@ -428,8 +428,11 @@ function parseTribeConquersPageRedLossesAmongWinners(
   html,
   targetYmd,
   victimTribeId,
-  winnerTribeIdSet
+  winnerTribeIdSet,
+  reportTimeZone,
+  twStatsDisplayedUtcOffsetMinutes
 ) {
+  const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
   const $table = findTribeConquerTable($);
   /** @type {Map<string, number>} */
@@ -455,7 +458,7 @@ function parseTribeConquersPageRedLossesAmongWinners(
     if (!tribeConquerRowIsRedLoss($, tds, victimTribeId, oldIdx, newIdx)) continue;
 
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
-    const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
+    const rowYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twOff);
     if (!rowYmd) continue;
     if (rowYmd < targetYmd) {
       hitOlderDay = true;
@@ -500,6 +503,8 @@ export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeader
     userAgent,
     delayMs = 0,
     rankingHtml,
+    timezone = 'Europe/Istanbul',
+    twStatsDisplayedUtcOffsetMinutes,
   } = options;
 
   const rankHtml = rankingHtml ?? (await fetchHtml(rankingUrl, { userAgent }));
@@ -525,7 +530,9 @@ export async function countTakesFromVictimAmongTopTribes(rankingUrl, matchHeader
         html,
         targetYmd,
         String(victimTribeId),
-        winnerIdSet
+        winnerIdSet,
+        timezone,
+        twStatsDisplayedUtcOffsetMinutes
       );
       for (const [id, n] of counts) totals.set(id, (totals.get(id) || 0) + n);
       if (hitOlderDay) stop = true;
@@ -682,7 +689,14 @@ function tribeConquersListUrl(rankingUrl, tribeId, pageNum) {
  * TWStats klan fetih tablosunda ilk hücredeki ikon: yeşil = alım, kırmızı = kayıp.
  * İkon yoksa (TWStats güncellemesi) Old/New Owner tribelink ile ayırt edilir.
  */
-function parseTribeConquersWidgetForToday(html, targetYmd, tribeId) {
+function parseTribeConquersWidgetForToday(
+  html,
+  targetYmd,
+  tribeId,
+  reportTimeZone,
+  twStatsDisplayedUtcOffsetMinutes
+) {
+  const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const $ = cheerio.load(html);
   const $table = findTribeConquerTable($);
   if (!$table || !$table.length) return { added: 0, hitOlderDay: true, tableFound: false };
@@ -704,7 +718,7 @@ function parseTribeConquersWidgetForToday(html, targetYmd, tribeId) {
     const tds = $(tr).find('td').toArray();
     if (tds.length <= dateIdx) continue;
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
-    const rowYmd = twStatsConquerCellLocalYmd(dateRaw);
+    const rowYmd = conquerReportYmdFromTwCell(dateRaw, reportTimeZone, twOff);
     if (!rowYmd) continue;
     if (rowYmd < targetYmd) {
       hitOlderDay = true;
@@ -717,6 +731,8 @@ function parseTribeConquersWidgetForToday(html, targetYmd, tribeId) {
 }
 
 async function countTodayConquersViaTribePages(rankingUrl, tribeId, targetYmd, options, maxPages) {
+  const reportTimeZone = options.timezone || 'Europe/Istanbul';
+  const twOff = options.twStatsDisplayedUtcOffsetMinutes;
   let total = 0;
   let error = null;
   for (let pn = 1; pn <= maxPages; pn++) {
@@ -725,7 +741,13 @@ async function countTodayConquersViaTribePages(rankingUrl, tribeId, targetYmd, o
       const html = await fetchHtml(url, { userAgent: options.userAgent });
       if (pn === 1) {
         const diag = diagnoseTwStatsHtml(html);
-        const probe = parseTribeConquersWidgetForToday(html, targetYmd, tribeId);
+        const probe = parseTribeConquersWidgetForToday(
+          html,
+          targetYmd,
+          tribeId,
+          reportTimeZone,
+          twOff
+        );
         if (!probe.tableFound) {
           error = diag.ok
             ? 'Fetih tablosu bulunamadı (TWStats HTML yapısı değişmiş olabilir)'
@@ -733,7 +755,13 @@ async function countTodayConquersViaTribePages(rankingUrl, tribeId, targetYmd, o
           break;
         }
       }
-      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(html, targetYmd, tribeId);
+      const { added, hitOlderDay } = parseTribeConquersWidgetForToday(
+        html,
+        targetYmd,
+        tribeId,
+        reportTimeZone,
+        twOff
+      );
       total += added;
       if (hitOlderDay) break;
     } catch (e) {
