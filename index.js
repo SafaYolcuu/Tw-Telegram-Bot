@@ -7,6 +7,7 @@ import {
   countTakesFromVictimAmongTopTribes,
   fetchHtml,
   findTribeInRankingByTag,
+  ymdInTimeZone,
   ymdYesterdayInTimeZone,
 } from './src/scrape.js';
 import { escapeHtml, formatDigest, formatDigestHtml } from './src/formatMessage.js';
@@ -24,6 +25,14 @@ import {
   searchPlayerByName,
   worldIndexBaseFromRankingUrl,
 } from './src/playerConquers.js';
+import {
+  collectWarDigestBlocks,
+  computeWarStats,
+  conquerYmdFromDdMmYyyy,
+  formatWarStatsHtml,
+  normalizeWars,
+  warCommandSlug,
+} from './src/warSides.js';
 
 const argv = process.argv.slice(2);
 
@@ -35,6 +44,7 @@ async function collectAndFormat(markdown) {
     timezone: cfg.timezone,
     twStatsDisplayedUtcOffsetMinutes: cfg.twStatsDisplayedUtcOffsetMinutes,
   });
+  results.push(...(await collectWarDigestBlocks(cfg)));
   const worldLabel = cfg.worldLabel || 'TW';
   const tz = cfg.timezone || 'Europe/Istanbul';
   return markdown
@@ -98,11 +108,26 @@ async function buildDigestHtml(cfg, digestOpts = {}) {
     conquerDayYmd: digestOpts.conquerDayYmd,
     twStatsDisplayedUtcOffsetMinutes: cfg.twStatsDisplayedUtcOffsetMinutes,
   });
+  const warBlocks = await collectWarDigestBlocks(cfg, digestOpts);
+  results.push(...warBlocks);
   return formatDigestHtml({
     worldLabel: cfg.worldLabel || 'TW',
     results,
     timezone: cfg.timezone || 'Europe/Istanbul',
   });
+}
+
+function parseOptionalWarDateArg(text, timeZone) {
+  const rest = String(text || '')
+    .trim()
+    .replace(/^\S+\s*/, '')
+    .trim()
+    .replace(/^@\S+\s*/i, '')
+    .trim();
+  if (!rest) return null;
+  if (/^\d{8}$/.test(rest)) return conquerYmdFromDdMmYyyy(rest);
+  if (/^\d{4}$/.test(rest)) return conquerYmdFromDdMm(rest, timeZone);
+  throw new Error('Tarih GGAAYYYY (örn. 13102026) veya GGAŞ (örn. 1310) olmalı.');
 }
 
 async function sendDigestForSlot(cfg, slot, sendFn) {
@@ -122,11 +147,23 @@ async function sendDigestForSlot(cfg, slot, sendFn) {
 }
 
 async function runTelegramUpdates() {
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const useBarbar = argv.includes('--barbar');
+  const token = useBarbar
+    ? process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim()
+    : process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) {
-    console.error('TELEGRAM_BOT_TOKEN .env içinde tanımlı olmalı.');
+    console.error(
+      useBarbar
+        ? 'TELEGRAM_BARBAR_BOT_TOKEN (veya TELEGRAM_BOT_TOKEN) .env içinde tanımlı olmalı.'
+        : 'TELEGRAM_BOT_TOKEN .env içinde tanımlı olmalı.'
+    );
     process.exit(1);
   }
+  console.log(
+    useBarbar
+      ? 'Barbar bot token ile getUpdates (TELEGRAM_BARBAR_CHAT_ID için).'
+      : 'Vegas/istatistik bot token ile getUpdates (TELEGRAM_CHAT_ID için).'
+  );
   const base = `https://api.telegram.org/bot${token}`;
   const me = await axios.get(`${base}/getMe`, { timeout: 15000 });
   console.log('Bot:', JSON.stringify(me.data, null, 2));
@@ -153,7 +190,10 @@ async function runTelegramUpdates() {
 async function runSendTest() {
   const cfg = loadJsonConfig();
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const barbarToken =
+    process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim() || token;
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  const barbarChatId = process.env.TELEGRAM_BARBAR_CHAT_ID?.trim();
   if (!token || !chatId) {
     console.error('TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID .env içinde gerekli.');
     process.exit(1);
@@ -163,7 +203,7 @@ async function runSendTest() {
     userAgent: cfg.userAgent,
     delayMs: cfg.requestDelayMs ?? 0,
   });
-  await sendViaTelegram({ token, chatId, text: `<i>Kurulum testi</i>\n\n${body}` });
+  await sendViaTelegram({ token, chatId, text: `<i>Kurulum testi (istatistik grubu)</i>\n\n${body}` });
   try {
     if (alerts.length) {
       await sendViaTelegram({
@@ -175,24 +215,60 @@ async function runSendTest() {
   } finally {
     if (nextSnapshot != null) persistTribeTransferSnapshot(nextSnapshot);
   }
-  console.log('Test mesajı gönderildi.');
+  console.log('İstatistik test mesajı gönderildi.');
+
+  if (cfg.barbarMonitor?.enabled) {
+    if (!barbarChatId) {
+      console.error('barbarMonitor açık ama TELEGRAM_BARBAR_CHAT_ID boş — barbar test atlandı.');
+    } else if (!barbarToken) {
+      console.error('TELEGRAM_BARBAR_BOT_TOKEN boş — barbar test atlandı.');
+    } else {
+      await sendViaTelegram({
+        token: barbarToken,
+        chatId: barbarChatId,
+        text: '<i>Kurulum testi (barbar grubu)</i>\nBarbar bildirimleri bu sohbete gelecek.',
+      });
+      console.log('Barbar test mesajı gönderildi.');
+    }
+  }
 }
 
 function startBot() {
   const cfg = loadJsonConfig();
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const barbarToken = process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim() || token;
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  const barbarChatId = process.env.TELEGRAM_BARBAR_CHAT_ID?.trim();
   if (!token || !chatId) {
     console.error('TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID .env içinde gerekli.');
     console.error('chat_id için: npm run telegram-updates');
     process.exit(1);
   }
+  const barbarOn = cfg.barbarMonitor?.enabled === true;
+  if (barbarOn && !barbarChatId) {
+    console.error('barbarMonitor.enabled=true iken TELEGRAM_BARBAR_CHAT_ID .env içinde gerekli.');
+    console.error('Barbar grubunda mesaj yazıp: npm run telegram-updates -- --barbar');
+    process.exit(1);
+  }
+  if (barbarOn && !process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim()) {
+    console.warn(
+      'Uyarı: TELEGRAM_BARBAR_BOT_TOKEN yok — barbar bildirimleri Vegas bot tokenı ile gidecek.'
+    );
+  }
+
+  /** İstatistik / klan transfer → TELEGRAM_CHAT_ID (Vegas bot) */
   const sendText = (text) => sendViaTelegram({ token, chatId, text });
+  /** Barbar bildirimleri → TELEGRAM_BARBAR_CHAT_ID (barbar bot) */
+  const sendBarbar = (text) =>
+    sendViaTelegram({ token: barbarToken, chatId: barbarChatId || chatId, text });
   const sendToChat = (targetChatId, text) => sendViaTelegram({ token, chatId: targetChatId, text });
+
+  /** Komutlar yalnızca Vegas grubunda (Vegas bot polling) */
+  const allowedChatIds = [chatId];
 
   const stopPoll = startTelegramPolling({
     token,
-    allowedChatId: chatId,
+    allowedChatIds,
     sendHtml: sendToChat,
     commands: [
       {
@@ -209,12 +285,20 @@ function startBot() {
               '/info.takma — Son N günde günlük + toplam köy (N=<code>playerConquerStatsDays</code>, takma adlar <code>telegramPlayerAliases</code>)',
               '/gunsonu — Dünün fetih özeti (manuel Z raporu)',
               '/plan — Zamanlanmış gönderim saatleri',
-              '/barbar — Barbar monitörü durumu',
               '/ping — Bot çalışıyor mu?',
+              '/barbar — Barbar monitörü durumu',
+              '/savas — Tüm savaşlar (bugün, TR takvim)',
+              '/savas GGAAYYYY — Tüm savaşlar (o gün)',
+              ...normalizeWars(loadJsonConfig()).map((w) => {
+                const s = warCommandSlug(w);
+                return `/${s} — ${escapeHtml(w.name)} toplam skor; /${s} GGAAYYYY — o gün`;
+              }),
               '',
               '/komutlar — Bu listeyi gösterir (aynı: /help, /yardim, /commands)',
               '',
               '<i>Sıra/puan tablosu her zaman güncel TW verisidir; tarih seçimi fetih sayıları içindir.</i>',
+              '<i>TWStats saati TR’ye göre geridedir; gün sınırı ofset ile İstanbul takvimine oturtulur.</i>',
+              '<i>Özetler istatistik grubuna; yeni barbarlar barbar grubuna gider.</i>',
             ].join('\n')
           );
         },
@@ -228,11 +312,10 @@ function startBot() {
       {
         match: /^\/barbar(?:@\w+)?$/i,
         heavy: true,
-        loadingHtml: '<i>Barbar verisi alınıyor…</i>',
+        loadingHtml: '<i>Barbar durumu alınıyor…</i>',
         async run(cid) {
-          const freshCfg = loadJsonConfig();
-          const text = await getBarbarStatus(freshCfg);
-          await sendToChat(cid, text);
+          const status = await getBarbarStatus(loadJsonConfig());
+          await sendToChat(cid, status);
         },
       },
       {
@@ -389,8 +472,6 @@ function startBot() {
               userAgent: freshCfg.userAgent,
               delayMs: freshCfg.requestDelayMs ?? 0,
               rankingHtml: rankHtml,
-              timezone: tz,
-              twStatsDisplayedUtcOffsetMinutes: freshCfg.twStatsDisplayedUtcOffsetMinutes,
             });
             if (error) throw new Error(error);
             const header = `<b>${escapeHtml(y)}</b> — <b>${escapeHtml(victimName)}</b> köylerini ilk <b>${topN}</b> sıradaki hangi klanlar almış\n<i>(TWStats klan fetih sayfası — kırmızı/kayıp satırlar, tarih sütunu günü)</i>`;
@@ -419,6 +500,49 @@ function startBot() {
           console.log(`[/info] Özet gönderildi (${cid}).`);
         },
       },
+      {
+        match: /^\/savas(?:@\w+)?$/i,
+        heavy: true,
+        loadingHtml: '<i>Savaş istatistiği çekiliyor…</i>',
+        async run(cid, meta) {
+          const freshCfg = loadJsonConfig();
+          const wars = normalizeWars(freshCfg);
+          if (!wars.length) throw new Error('config.json: wars tanımlı değil.');
+          const tz = freshCfg.timezone || 'Europe/Istanbul';
+          const day = parseOptionalWarDateArg(meta.text, tz);
+          const parts = [];
+          for (const war of wars) {
+            const stats = await computeWarStats(freshCfg, war, {
+              conquerDayYmd: day || ymdInTimeZone(tz),
+            });
+            parts.push(formatWarStatsHtml(stats, { worldLabel: freshCfg.worldLabel }));
+          }
+          await sendToChat(cid, parts.join('\n\n'));
+          console.log(`[/savas] ${day || 'bugün'} gönderildi (${cid}).`);
+        },
+      },
+      ...normalizeWars(cfg).map((war) => {
+        const slug = warCommandSlug(war);
+        return {
+          match: new RegExp(`^/${slug}(?:@\\w+)?$`, 'i'),
+          heavy: true,
+          loadingHtml: `<i>${escapeHtml(war.name)} çekiliyor…</i>`,
+          async run(cid, meta) {
+            const freshCfg = loadJsonConfig();
+            const wars = normalizeWars(freshCfg);
+            const live = wars.find((w) => warCommandSlug(w) === slug) || war;
+            const tz = freshCfg.timezone || 'Europe/Istanbul';
+            const day = parseOptionalWarDateArg(meta.text, tz);
+            const stats = await computeWarStats(freshCfg, live, {
+              conquerDayYmd: day,
+            });
+            await sendToChat(cid, formatWarStatsHtml(stats, { worldLabel: freshCfg.worldLabel }));
+            console.log(
+              `[/${slug}] ${day || 'toplam'} gönderildi (${cid}).`
+            );
+          },
+        };
+      }),
     ],
   });
 
@@ -437,19 +561,24 @@ function startBot() {
       })
     : () => {};
 
-  // ── Barbar Monitörü ──────────────────────────────────────────────────────
-  const barbarOn = cfg.barbarMonitor?.enabled === true;
   const barbarIntervalMin = cfg.barbarMonitor?.intervalMinutes ?? 5;
   const stopBarbar = barbarOn
     ? scheduleEveryNMinutes({
         n: barbarIntervalMin,
         timezone: cfg.timezone,
-        onTick: () => runBarbarScan({ cfg: loadJsonConfig(), sendFn: sendText }),
+        onTick: () => runBarbarScan({ cfg: loadJsonConfig(), sendFn: sendBarbar }),
       })
     : () => {};
 
-  console.log(`Telegram. chat_id: ${chatId}. Özet (${cfg.timezone}): ${cfg.schedule.join(', ')}`);
-  console.log('Telegram: /komutlar veya /help (yalnızca bu chat_id).');
+  console.log(`Telegram istatistik chat_id: ${chatId}. Özet (${cfg.timezone}): ${cfg.schedule.join(', ')}`);
+  if (barbarOn) {
+    console.log(
+      `Telegram barbar chat_id: ${barbarChatId} (ayrı bot: ${
+        process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim() ? 'evet' : 'hayır — Vegas token'
+      })`
+    );
+  }
+  console.log('Telegram: /komutlar veya /help (kayıtlı chat_id sohbetlerinde).');
   if (transfersOn) {
     console.log(`Klan üye taraması: her saat başı (${cfg.timezone})`);
     runTransferScan(cfg, sendText).catch((e) => console.error('Başlangıç klan taraması:', e));
@@ -457,7 +586,9 @@ function startBot() {
   if (barbarOn) {
     const conts = (cfg.barbarMonitor?.watchContinents ?? []).map((c) => `K${c}`).join(', ') || 'Tümü';
     console.log(`Barbar monitörü: her ${barbarIntervalMin} dk — kıtalar: ${conts}`);
-    runBarbarScan({ cfg, sendFn: sendText }).catch((e) => console.error('Başlangıç barbar taraması:', e));
+    runBarbarScan({ cfg, sendFn: sendBarbar }).catch((e) =>
+      console.error('Başlangıç barbar taraması:', e)
+    );
   }
 
   process.on('SIGINT', () => {

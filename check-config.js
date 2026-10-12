@@ -33,13 +33,30 @@ if (!fs.existsSync(cfgPath)) {
 }
 
 const tok = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const barbarTok = process.env.TELEGRAM_BARBAR_BOT_TOKEN?.trim();
 const cid = process.env.TELEGRAM_CHAT_ID?.trim();
-if (!tok) bad('.env: TELEGRAM_BOT_TOKEN boş (BotFather token).');
-else good('TELEGRAM_BOT_TOKEN dolu');
+const barbarCid = process.env.TELEGRAM_BARBAR_CHAT_ID?.trim();
+if (!tok) bad('.env: TELEGRAM_BOT_TOKEN boş (Vegas bot token).');
+else good('TELEGRAM_BOT_TOKEN dolu (Vegas)');
 if (!cid) bad('.env: TELEGRAM_CHAT_ID boş (npm run telegram-updates ile bulun).');
 else good('TELEGRAM_CHAT_ID dolu');
 
 const cfgJson = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : null;
+if (cfgJson?.barbarMonitor?.enabled) {
+  if (!barbarTok) {
+    bad('.env: TELEGRAM_BARBAR_BOT_TOKEN boş (barbarMonitor açık — ayrı barbar bot token).');
+  } else if (barbarTok === tok) {
+    bad('.env: TELEGRAM_BARBAR_BOT_TOKEN, TELEGRAM_BOT_TOKEN ile aynı — iki ayrı bot kullanın.');
+  } else good('TELEGRAM_BARBAR_BOT_TOKEN dolu (barbar bot)');
+  if (!barbarCid) bad('.env: TELEGRAM_BARBAR_CHAT_ID boş (npm run telegram-updates -- --barbar).');
+  else if (cid && barbarCid === cid) {
+    bad('.env: TELEGRAM_BARBAR_CHAT_ID, TELEGRAM_CHAT_ID ile aynı — ayrı grup kullanın.');
+  } else good('TELEGRAM_BARBAR_CHAT_ID dolu (barbar grubu)');
+  if (cfgJson.barbarMonitor.server) good(`barbarMonitor.server: ${cfgJson.barbarMonitor.server}`);
+} else if (barbarCid || barbarTok) {
+  good('Barbar token/chat_id dolu (barbarMonitor kapalı — kullanılmaz)');
+}
+
 const tribeSrc = cfgJson?.sources?.find((s) => s.type === 'tribe_top_villages_and_today_conquers');
 if (tribeSrc?.rankingUrl) {
   try {

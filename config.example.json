@@ -1,42 +1,58 @@
 {
   "timezone": "Europe/Istanbul",
   "schedule": ["12:00", "00:00"],
-  "worldLabel": "TR101",
+  "worldLabel": "TR104",
   "requestDelayMs": 800,
   "twStatsDisplayedUtcOffsetMinutes": 120,
   "playerConquerStatsDays": 3,
   "maxPlayerConquerPages": 35,
+  "maxWarConquerPages": 80,
+  "warRankingScanRows": 300,
   "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  "telegramPlayerAliases": {
-    "kubilay": "*hardzoom*",
-    "cemil": "koloniis",
-    "fahri": "ozzzbek",
-    "emre": ".emrebey.",
-    "eyüp": "MANCHESTER CITY F.C.",
-    "berkay": "simosm",
-    "safa": "heinaxx",
-    "suat": "masculine41",
-    "furkan": "floydian1",
-    "alper": "ceymakcur500",
-    "mert": "qmanyaq",
-    "mahmut": "mahmutbyz",
-    "ozan": "procyon",
-    "övünç": "maxel",
-    "hasan": "hasan6576"
-  },
+  "telegramPlayerAliases": {},
+  "wars": [
+    {
+      "name": "Vegas vs UDW",
+      "command": "vegasvsudw",
+      "sides": [
+        {
+          "name": "Vegas",
+          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "VEGAS1", "CASİN6", "CASİN4"]
+        },
+        {
+          "name": "UDW",
+          "tags": ["UDW-A", "UDW-25", "UDW-2", "UDWK53", "UDW"]
+        }
+      ]
+    },
+    {
+      "name": "VegasvsEibo",
+      "command": "vegasvseibo",
+      "sides": [
+        {
+          "name": "Vegas",
+          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "VEGAS1", "CASİN6", "CASİN4"]
+        },
+        {
+          "name": "Eibo",
+          "tags": ["EİBO", "EİBO K", "EİBO 2", "EİBO 3", "EK 2"]
+        }
+      ]
+    }
+  ],
   "barbarMonitor": {
     "enabled": true,
-    "server": "tr101.klanlar.org",
+    "server": "tr104.klanlar.org",
     "intervalMinutes": 5,
-    "watchContinents": ["65", "66", "56"],
+    "watchContinents": ["55", "56", "65", "66"],
     "minPoints": 0,
     "maxPoints": 500
   },
   "sources": [
     {
       "type": "tribe_top_villages_and_today_conquers",
-      "gameGuestRankingUrl": "https://tr101.klanlar.org/guest.php?screen=ranking&mode=ally",
-      "rankingUrl": "https://tr.twstats.com/tr101/index.php?page=rankings&mode=tribes",
+      "gameGuestRankingUrl": "https://tr104.klanlar.org/guest.php?screen=ranking&mode=ally",
+      "rankingUrl": "https://tr.twstats.com/tr104/index.php?page=rankings&mode=tribes",
       "matchHeaders": [
         "Rank",
         "Tag",

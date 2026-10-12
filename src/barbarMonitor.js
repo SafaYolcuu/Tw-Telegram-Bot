@@ -7,7 +7,7 @@
  * Konfigürasyon (config.json içinde):
  *   barbarMonitor: {
  *     enabled: true,
- *     server: "tr101.klanlar.org",
+ *     server: "tr105.klanlar.org",
  *     intervalMinutes: 5,
  *     watchContinents: ["55"],   // boş → tüm harita
  *     minPoints: 0,
@@ -116,6 +116,13 @@ function escHtml(s) {
     .replace(/>/g, '&gt;');
 }
 
+/** world host -> tribalwarsmap link */
+function mapLinkForCoord(server, coord) {
+  const host = String(server || '').replace(/^https?:\/\//, '');
+  const world = host.split('.')[0] || 'tr';
+  return `https://${world}.tribalwarsmap.com/tr/#${coord}`;
+}
+
 function buildMessage(newBarbs, worldLabel, server) {
   const host = server.replace(/^https?:\/\//, '');
   const contList = [...new Set(newBarbs.map((v) => `K${v.cont}`))].sort().join(', ');
@@ -126,10 +133,10 @@ function buildMessage(newBarbs, worldLabel, server) {
   const rows = [...newBarbs]
     .sort((a, b) => a.pts - b.pts)
     .map((v) => {
-      const mapUrl = `https://${host.replace('klanlar.org', 'tribalwarsmap.com/tr')}#${v.coord}`;
+      const mapUrl = mapLinkForCoord(server, v.coord);
       return (
         `📍 <code>${v.coord}</code> — <b>${v.pts} puan</b> — K${v.cont}\n` +
-        `   <a href="https://tr101.tribalwarsmap.com/tr/#${v.coord}">${escHtml(v.name)}</a>`
+        `   <a href="${mapUrl}">${escHtml(v.name)}</a>`
       );
     })
     .join('\n');
@@ -147,7 +154,7 @@ export async function runBarbarScan({ cfg, sendFn }) {
   const bCfg = cfg.barbarMonitor;
   if (!bCfg?.enabled) return;
 
-  const server          = bCfg.server          ?? 'tr101.klanlar.org';
+  const server          = bCfg.server          ?? 'tr105.klanlar.org';
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;
@@ -210,7 +217,7 @@ export async function getBarbarStatus(cfg) {
   const bCfg = cfg.barbarMonitor;
   if (!bCfg?.enabled) return '<i>Barbar monitörü kapalı.</i>';
 
-  const server          = bCfg.server          ?? 'tr101.klanlar.org';
+  const server          = bCfg.server          ?? 'tr105.klanlar.org';
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;

@@ -14,7 +14,8 @@ import { escapeHtml } from './formatMessage.js';
 /**
  * @param {object} opts
  * @param {string} opts.token
- * @param {string|number} opts.allowedChatId
+ * @param {string|number} [opts.allowedChatId] — Tek sohbet (geriye uyum)
+ * @param {(string|number)[]} [opts.allowedChatIds] — Birden fazla sohbet (istatistik + barbar grubu)
  * @param {(chatId: string | number, text: string) => Promise<void>} opts.sendHtml
  * @param {TelegramBotCommand[]} opts.commands — İlk eşleşen çalışır (sıra önemli)
  * @param {number} [opts.heavyCooldownMs]
@@ -26,7 +27,14 @@ export function startTelegramPolling(opts) {
   let heavyInFlight = false;
   let lastHeavyAt = 0;
   const heavyCooldownMs = opts.heavyCooldownMs ?? 45_000;
-  const allowed = String(opts.allowedChatId).trim();
+  const allowedSet = new Set(
+    [
+      ...(Array.isArray(opts.allowedChatIds) ? opts.allowedChatIds : []),
+      opts.allowedChatId,
+    ]
+      .filter((x) => x != null && String(x).trim() !== '')
+      .map((x) => String(x).trim())
+  );
 
   async function handleUpdate(update) {
     const msg = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
@@ -49,7 +57,7 @@ export function startTelegramPolling(opts) {
     // #endregion
 
     const chatId = msg.chat.id;
-    if (String(chatId) !== allowed) {
+    if (!allowedSet.has(String(chatId))) {
       await opts.sendHtml(chatId, escapeHtml('Bu komut yalnızca kayıtlı hedef sohbette kullanılabilir.'));
       return;
     }

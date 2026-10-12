@@ -20,10 +20,12 @@
 1. Telegram’da [@BotFather](https://t.me/BotFather) açın.
 2. `/newbot` → isim ve kullanıcı adı verin.
 3. BotFather’ın verdiği **HTTP API token** metnini kopyalayın.
-4. `.env` içine yazın:
+4. İki bot önerilir: biri **Vegas/istatistik**, biri **barbar**. `.env`:
    ```env
-   TELEGRAM_BOT_TOKEN=buraya_yapistirin
+   TELEGRAM_BOT_TOKEN=vegas_bot_token
+   TELEGRAM_BARBAR_BOT_TOKEN=barbar_bot_token
    ```
+   Token’ları sohbete yapıştırmayın; sızdıysa BotFather → **/revoke**.
 
 ### Gizlilik modu (grupta çok önemli)
 
@@ -49,7 +51,12 @@ Böylece gruptaki normal mesajlar da `getUpdates` ile gelir; `telegram-updates` 
 5. Çıktıdaki **`chat.id`** değerini (çoğu grup `-100...` ile başlar) `.env` içine yazın:
    ```env
    TELEGRAM_CHAT_ID=-100xxxxxxxxxx
+   TELEGRAM_BARBAR_CHAT_ID=-100yyyyyyyyyy
    ```
+   - **`TELEGRAM_CHAT_ID`**: klan istatistik özeti + `/info` komutları  
+   - **`TELEGRAM_BARBAR_CHAT_ID`**: barbar grubu (`npm run telegram-updates:barbar` ile alın)  
+   - **`TELEGRAM_BARBAR_BOT_TOKEN`**: barbar botu (Vegas botundan ayrı)  
+   Botu **her iki gruba** da ekleyin; her grupta bir mesaj yazıp `telegram-updates` ile id’leri ayırın.
 6. Doğrulama:
    ```bash
    npm run check-config
@@ -70,12 +77,15 @@ Böylece gruptaki normal mesajlar da `getUpdates` ile gelir; `telegram-updates` 
    - **`/gunsonu`** veya **`/günsonu`** — **Dünün** fetih özeti (manuel Z raporu; TW ağır istek).  
    - **`/plan`** veya **`/zaman`** — `config.json` içindeki `schedule` + `timezone` metni.  
    - **`/ping`** — Bot ayakta mı.  
+   - **`/savas`** — Tüm `wars` için bugünün (TR) taraflar arası + taraf toplamı.  
+   - **`/savas 13102026`** — Aynı, o gün (GGAAYYYY).  
+   - **`/vegasvseibo`**, **`/vegasvsudw`** (config `wars[].command`) — Tarihsiz: **toplam skor**; **`/vegasvseibo 13102026`**: o gün hangi taraf diğerinden kaç köy almış.  
    - **`/komutlar`**, **`/help`**, **`/yardim`**, **`/commands`** — Aynı metin: mevcut komutların listesi.  
 
-   `/info` ve `/gunsonu` zamanlanmış gönderim kaydını **değiştirmez**. Bu ikisi için ortak kural: yaklaşık **45 sn** bekleme; biri çalışırken diğeri kuyrukta bekler uyarısı. Yeni komut eklemek için `index.js` içindeki `startTelegramPolling({ commands: [...] })` dizisine nesne eklemeniz yeterli (`src/telegramPoll.js` yönlendirir).  
+   `/info`, `/gunsonu` ve savaş komutları zamanlanmış gönderim kaydını **değiştirmez**. Ağır komutlar için yaklaşık **45 sn** bekleme.  
 
    İsteğe bağlı BotFather → `/setcommands` örneği:  
-   `info - Tam özet` / `gunsonu - Dünün özeti` / `plan - Gönderim saatleri` / `ping - Test` / `help - Komutlar`
+   `info - Tam özet` / `gunsonu - Dünün özeti` / `savas - Savaş özeti` / `vegasvseibo - Vegas vs Eibo` / `vegasvsudw - Vegas vs UDW` / `ping - Test`
 
    **Dikkat:** Bot çalışırken `npm run telegram-updates` çalıştırmayın; ikisi de Telegram’dan `getUpdates` bekler, güncellemeler tek akışta olduğu için biri diğerinin mesajlarını “çalar”.
 
@@ -97,13 +107,17 @@ Böylece gruptaki normal mesajlar da `getUpdates` ile gelir; `telegram-updates` 
 
 | Alan | Ne yaparsınız |
 |------|----------------|
-| `worldLabel` | Mesaj başlığında görünen dünya adı (örn. `TR101`) |
+| `worldLabel` | Mesaj başlığında görünen dünya adı (örn. `TR104`) |
+| `wars` | Savaş listesi: `{ name, command, sides: [{ name, tags }] }`. Her savaş bağımsız; `/command` ve digest’te taraflar arası + taraf toplamı. |
+| `maxWarConquerPages` | Savaş taramasında klan fetih sayfası üst sınırı (varsayılan 80) |
+| `barbarMonitor` | Yeni barbar köyleri; bildirimler `TELEGRAM_BARBAR_CHAT_ID` grubuna gider. `watchContinents` boşsa tüm harita; örn. `["55","65"]` |
+| `telegramPlayerAliases` | `/info.takma` için takma ad → TW nick (kendiniz doldurun) |
 | `schedule` | Gönderim saatleri `["12:00","00:00"]` — `timezone` ile birlikte. Tam **`00:00`** slotu: fetih sayıları **biten gün** için (Z raporu / gün sonu); diğer saatler **o günün** o ana kadar ki verisi |
 | `timezone` | Örn. `Europe/Istanbul` |
 | `sources` | Her satır: farklı **URL** + `matchHeaders` (tablodaki `th` metinleri) + `maxRows` |
 | `requestDelayMs` | Ardışık sayfa istekleri arası bekleme |
 
-Örnek: başka dünya → `url` içinde `tr101` yerine `tr85` vb. kullanın; tablo başlıkları aynı kalıyorsa `matchHeaders` değişmez.
+Örnek: başka dünya → `url` içinde `tr104` yerine `tr85` vb. kullanın; tablo başlıkları aynı kalıyorsa `matchHeaders` değişmez.
 
 Yeni bir tablo eklemek için `sources` dizisine yeni bir nesne eklemeniz yeterli (URL + o sayfadaki widget başlıkları).
 
@@ -111,7 +125,7 @@ Yeni bir tablo eklemek için `sources` dizisine yeni bir nesne eklemeniz yeterli
 
 İlk N klan için köy sayısı + **aynı klanların bugünkü** ( `timezone` takvimine göre ) ele geçirme adedi.
 
-- **`gameGuestRankingUrl` (isteğe bağlı):** TW Stats bazen toplam **puan** ve **köy** sayısını gecikmeli günceller. Bu alanı doldurursanız (örn. [TR101 misafir klan sıralaması](https://tr101.klanlar.org/guest.php?screen=ranking&mode=ally)), listedeki **puan ve köy** değerleri oyun sitesinden okunur; **sıra ve klan kimliği** yine TW Stats’tan gelir, **bugün alınan köy** sayımı yine TW Stats klan fetih sayfalarındandır (değişmez).
+- **`gameGuestRankingUrl` (isteğe bağlı):** TW Stats bazen toplam **puan** ve **köy** sayısını gecikmeli günceller. Bu alanı doldurursanız (örn. [TR105 misafir klan sıralaması](https://tr105.klanlar.org/guest.php?screen=ranking&mode=ally)), listedeki **puan ve köy** değerleri oyun sitesinden okunur; **sıra ve klan kimliği** yine TW Stats’tan gelir, **bugün alınan köy** sayımı yine TW Stats klan fetih sayfalarındandır (değişmez).
 - Sıralama: `rankingUrl` genelde `.../index.php?page=rankings&amp;mode=tribes`
 - Bugünkü sayım: varsayılan **`todayConquerMethod`: `tribe_pages`** — TW Stats’taki klan sayfasıyla aynı mantık:  
   `index.php?page=tribe&amp;mode=conquers&amp;id=KLAN_ID&amp;type=&amp;pn=1` (site `pn=-1` ile tümünü gösterir; bot sayfa sayfa okur, `maxTribeConquerPages` ile sınırlı)

@@ -41,7 +41,7 @@ export function scheduleHourlyOnTheHour({ timezone, onTick }) {
   return () => task.stop();
 }
 
-/** Her N dakikada bir — örn. n=5 → `*\/5 * * * *` */
+/** Her N dakikada bir — örn. n=5 → her 5 dakikada bir cron. */
 export function scheduleEveryNMinutes({ n, timezone, onTick }) {
   const expr = `*/${Math.max(1, Math.floor(n))} * * * *`;
   if (!cron.validate(expr)) throw new Error(`${n} dakikalık cron doğrulanamadı: ${expr}`);

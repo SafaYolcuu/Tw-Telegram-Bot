@@ -1,6 +1,6 @@
 {
   "name": "twstats-telegram-bot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Zamanlanmış TW Stats özeti → Telegram",
@@ -9,11 +9,11 @@
     "start": "node index.js",
     "check-config": "node check-config.js",
     "telegram-updates": "node index.js --telegram-updates",
+    "telegram-updates:barbar": "node index.js --telegram-updates --barbar",
     "send-test": "node index.js --send-test",
     "dry-run": "node index.js --dry-run",
     "pm2:start": "pm2 start ecosystem.config.cjs",
-    "pm2:barbar-python": "pm2 start ecosystem.barbar-python.cjs",
-    "pm2:restart": "pm2 restart ecosystem.config.cjs",
+    "pm2:restart": "pm2 restart ecosystem.config.cjs --only twstats-bot",
     "update:server": "bash scripts/update-server.sh",
     "update:server:win": "powershell -ExecutionPolicy Bypass -File scripts/update-server.ps1",
     "probe:twstats": "node scripts/probe-twstats.js"
