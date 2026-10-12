@@ -19,3 +19,22 @@ export async function sendViaTelegram({ token, chatId, text }) {
     { timeout: 30000 }
   );
 }
+
+/**
+ * Telegram / menüsünde görünen komut listesi (BotFather setcommands eşdeğeri).
+ * @param {string} token
+ * @param {Array<{ command: string, description: string }>} commands
+ */
+export async function setTelegramBotCommands(token, commands) {
+  const url = `https://api.telegram.org/bot${token}/setMyCommands`;
+  await axios.post(
+    url,
+    {
+      commands: commands.map((c) => ({
+        command: String(c.command).replace(/^\//, '').toLowerCase(),
+        description: String(c.description).slice(0, 256),
+      })),
+    },
+    { timeout: 15000 }
+  );
+}

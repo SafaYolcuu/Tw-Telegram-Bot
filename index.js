@@ -13,7 +13,7 @@ import {
 import { escapeHtml, formatDigest, formatDigestHtml } from './src/formatMessage.js';
 import { scheduleDigestJobs, scheduleHourlyOnTheHour, scheduleEveryNMinutes } from './src/scheduler.js';
 import { alreadySentToday, markSentToday } from './src/dedupe.js';
-import { sendViaTelegram } from './src/sendTelegram.js';
+import { sendViaTelegram, setTelegramBotCommands } from './src/sendTelegram.js';
 import { startTelegramPolling } from './src/telegramPoll.js';
 import { computeTribeTransfers, persistTribeTransferSnapshot, formatTransferAlertsHtml } from './src/tribeTransfers.js';
 import { agentLog } from './src/debugAgentLog.js';
@@ -128,6 +128,55 @@ function parseOptionalWarDateArg(text, timeZone) {
   if (/^\d{8}$/.test(rest)) return conquerYmdFromDdMmYyyy(rest);
   if (/^\d{4}$/.test(rest)) return conquerYmdFromDdMm(rest, timeZone);
   throw new Error('Tarih GGAAYYYY (örn. 13102026) veya GGAŞ (örn. 1310) olmalı.');
+}
+
+function buildCommandsHelpHtml(cfg) {
+  const wars = normalizeWars(cfg);
+  const warLines = wars.flatMap((w) => {
+    const s = warCommandSlug(w);
+    return [
+      `/${s} — <b>${escapeHtml(w.name)}</b> toplam skor`,
+      `/${s} GGAAYYYY — o günün skoru (örn. <code>/${s} 13102026</code>)`,
+    ];
+  });
+  return [
+    '<b>Komutlar</b>',
+    '',
+    '<b>Özet</b>',
+    '/info — Tam özet (bugün)',
+    '/info2203 — 22 Mart fetih özeti (GGAŞ)',
+    '/gunsonu — Dünün özeti',
+    '/plan — Gönderim saatleri',
+    '',
+    '<b>Savaş</b>',
+    '/savas — Tüm savaşlar (bugün)',
+    '/savas 13102026 — Tüm savaşlar (o gün)',
+    ...warLines,
+    '',
+    '<b>Diğer</b>',
+    '/ping — Bot çalışıyor mu?',
+    '/barbar — Barbar monitör durumu',
+    '/komutlar — Bu liste (/help)',
+    '',
+    '<i>Yalnızca Vegas bildirim grubunda çalışır.</i>',
+  ].join('\n');
+}
+
+function buildTelegramMenuCommands(cfg) {
+  const wars = normalizeWars(cfg);
+  return [
+    { command: 'komutlar', description: 'Komut listesi' },
+    { command: 'info', description: 'Tam özet (bugün)' },
+    { command: 'gunsonu', description: 'Dünün özeti' },
+    { command: 'savas', description: 'Tüm savaşlar (bugün)' },
+    ...wars.map((w) => ({
+      command: warCommandSlug(w),
+      description: `${w.name} skoru`,
+    })),
+    { command: 'plan', description: 'Gönderim saatleri' },
+    { command: 'ping', description: 'Bot testi' },
+    { command: 'barbar', description: 'Barbar monitör durumu' },
+  ];
 }
 
 async function sendDigestForSlot(cfg, slot, sendFn) {
@@ -274,33 +323,7 @@ function startBot() {
       {
         match: /^\/(komutlar|help|yardim|commands)(@\w+)?$/i,
         async run(cid) {
-          await sendToChat(
-            cid,
-            [
-              '<b>Komutlar</b>',
-              '',
-              '/info — Tam özet (bugünün verisi)',
-              '/infoGGAŞ — Belirli günün fetih özeti (GGAŞ: gün+ay, örn. <code>/info2203</code> → 22 Mart)',
-              '/infoGGAŞ klan — O günde sıralamadaki klanların o klandan aldığı köy (örn. <code>/info2404 BOMBAC</code>)',
-              '/info.takma — Son N günde günlük + toplam köy (N=<code>playerConquerStatsDays</code>, takma adlar <code>telegramPlayerAliases</code>)',
-              '/gunsonu — Dünün fetih özeti (manuel Z raporu)',
-              '/plan — Zamanlanmış gönderim saatleri',
-              '/ping — Bot çalışıyor mu?',
-              '/barbar — Barbar monitörü durumu',
-              '/savas — Tüm savaşlar (bugün, TR takvim)',
-              '/savas GGAAYYYY — Tüm savaşlar (o gün)',
-              ...normalizeWars(loadJsonConfig()).map((w) => {
-                const s = warCommandSlug(w);
-                return `/${s} — ${escapeHtml(w.name)} toplam skor; /${s} GGAAYYYY — o gün`;
-              }),
-              '',
-              '/komutlar — Bu listeyi gösterir (aynı: /help, /yardim, /commands)',
-              '',
-              '<i>Sıra/puan tablosu her zaman güncel TW verisidir; tarih seçimi fetih sayıları içindir.</i>',
-              '<i>TWStats saati TR’ye göre geridedir; gün sınırı ofset ile İstanbul takvimine oturtulur.</i>',
-              '<i>Özetler istatistik grubuna; yeni barbarlar barbar grubuna gider.</i>',
-            ].join('\n')
-          );
+          await sendToChat(cid, buildCommandsHelpHtml(loadJsonConfig()));
         },
       },
       {
@@ -580,7 +603,10 @@ function startBot() {
       })`
     );
   }
-  console.log('Telegram: /komutlar veya /help (kayıtlı chat_id sohbetlerinde).');
+  console.log('Telegram: /komutlar veya /help (Vegas grubunda).');
+  setTelegramBotCommands(token, buildTelegramMenuCommands(cfg)).catch((e) =>
+    console.warn('setMyCommands:', e instanceof Error ? e.message : e)
+  );
   if (transfersOn) {
     console.log(`Klan üye taraması: her saat başı (${cfg.timezone})`);
     runTransferScan(cfg, sendText).catch((e) => console.error('Başlangıç klan taraması:', e));
