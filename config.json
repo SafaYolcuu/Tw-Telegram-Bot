@@ -50,7 +50,8 @@
     "intervalMinutes": 1,
     "watchContinents": ["55", "56", "65", "66"],
     "minPoints": 0,
-    "maxPoints": 500
+    "maxPoints": 500,
+    "excludeRects": [{ "x1": 496, "y1": 496, "x2": 503, "y2": 503 }]
   },
   "sources": [
     {

@@ -15,7 +15,8 @@
  *     intervalMinutes: 5,
  *     watchContinents: ["55"],   // boş → village.txt (tüm harita)
  *     minPoints: 0,
- *     maxPoints: 500
+ *     maxPoints: 500,
+ *     excludeRects: [{ x1: 496, y1: 496, x2: 503, y2: 503 }]  // merkez özel köyler
  *   }
  */
 
@@ -115,27 +116,38 @@ function parseBarbarVillages(text) {
 /**
  * /map.php sektör JSON'undan barbar köyleri çıkarır.
  * Village array: [id, img, name, points, ownerId, …] — owner "0" = barbar.
+ * TWMap eksenleri: villages[xOffset][yOffset] → x = data.x + p, y = data.y + d
+ * (resmi istemci: villageKey = 1000*(x) + y)
  * @param {object[]} sectors
  * @returns {Map<number, {id,coord,name,pts,cont}>}
  */
 function parseBarbarFromSectors(sectors) {
   const villages = new Map();
   for (const sec of sectors) {
-    const sx = Number(sec?.x);
-    const sy = Number(sec?.y);
-    const rows = sec?.data?.villages;
-    if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Array.isArray(rows)) continue;
+    const data = sec?.data;
+    const ox = Number(data?.x ?? sec?.x);
+    const oy = Number(data?.y ?? sec?.y);
+    const grid = data?.villages;
+    if (!Number.isFinite(ox) || !Number.isFinite(oy) || grid == null || typeof grid !== 'object') {
+      continue;
+    }
 
-    for (let yi = 0; yi < rows.length; yi++) {
-      const row = rows[yi];
-      if (!row || Array.isArray(row) || typeof row !== 'object') continue;
-      for (const [xiStr, v] of Object.entries(row)) {
-        if (!Array.isArray(v) || v.length < 5) continue;
+    for (const pStr of Object.keys(grid)) {
+      if (!Object.prototype.hasOwnProperty.call(grid, pStr)) continue;
+      const p = parseInt(pStr, 10);
+      const col = grid[pStr];
+      if (!Number.isFinite(p) || !col || typeof col !== 'object' || Array.isArray(col)) continue;
+
+      for (const dStr of Object.keys(col)) {
+        if (!Object.prototype.hasOwnProperty.call(col, dStr)) continue;
+        const d = parseInt(dStr, 10);
+        const v = col[dStr];
+        if (!Number.isFinite(d) || !Array.isArray(v) || v.length < 5) continue;
         if (String(v[4]) !== '0') continue; // owner
 
         const id = parseInt(v[0], 10);
-        const x = sx + parseInt(xiStr, 10);
-        const y = sy + yi;
+        const x = ox + p;
+        const y = oy + d;
         if (!Number.isFinite(id) || !Number.isFinite(x) || !Number.isFinite(y)) continue;
 
         let name = v[2];
@@ -149,6 +161,31 @@ function parseBarbarFromSectors(sectors) {
     }
   }
   return villages;
+}
+
+/**
+ * excludeRects: [{ x1, y1, x2, y2 }, ...] — kapsayan dikdörtgenler (dahil).
+ * @param {number} x
+ * @param {number} y
+ * @param {{x1:number,y1:number,x2:number,y2:number}[]} rects
+ */
+function isExcludedCoord(x, y, rects) {
+  if (!rects?.length) return false;
+  for (const r of rects) {
+    const x1 = Math.min(Number(r.x1), Number(r.x2));
+    const x2 = Math.max(Number(r.x1), Number(r.x2));
+    const y1 = Math.min(Number(r.y1), Number(r.y2));
+    const y2 = Math.max(Number(r.y1), Number(r.y2));
+    if (x >= x1 && x <= x2 && y >= y1 && y <= y2) return true;
+  }
+  return false;
+}
+
+/** "670|503" → {x,y} */
+function parseCoord(coord) {
+  const m = String(coord || '').match(/^(\d+)\|(\d+)$/);
+  if (!m) return null;
+  return { x: parseInt(m[1], 10), y: parseInt(m[2], 10) };
 }
 
 // ── HTTP ───────────────────────────────────────────────────────────────────
@@ -320,6 +357,7 @@ export async function runBarbarScan({ cfg, sendFn }) {
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;
+  const excludeRects    = bCfg.excludeRects     ?? [{ x1: 496, y1: 496, x2: 503, y2: 503 }];
   const worldLabel      = cfg.worldLabel        ?? 'TW';
 
   let current;
@@ -346,6 +384,11 @@ export async function runBarbarScan({ cfg, sendFn }) {
   const newBarbs = [];
   for (const village of current.values()) {
     if (seenCoords.has(village.coord)) continue;           // zaten bilinen koordinat
+    const xy = parseCoord(village.coord);
+    if (xy && isExcludedCoord(xy.x, xy.y, excludeRects)) {
+      seenCoords.add(village.coord); // bildirme, bilinen say
+      continue;
+    }
     if (watchContinents.length && !watchContinents.includes(village.cont)) continue;
     if (village.pts < minPts || village.pts > maxPts) continue;
     newBarbs.push(village);
@@ -386,6 +429,7 @@ export async function getBarbarStatus(cfg) {
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;
+  const excludeRects    = bCfg.excludeRects     ?? [{ x1: 496, y1: 496, x2: 503, y2: 503 }];
   const configuredSource =
     bCfg.dataSource ?? (watchContinents.length ? 'map' : 'village_txt');
 
@@ -399,6 +443,8 @@ export async function getBarbarStatus(cfg) {
 
   const seenCoords = loadState();
   const tracked = [...current.values()].filter((v) => {
+    const xy = parseCoord(v.coord);
+    if (xy && isExcludedCoord(xy.x, xy.y, excludeRects)) return false;
     if (watchContinents.length && !watchContinents.includes(v.cont)) return false;
     if (v.pts < minPts || v.pts > maxPts) return false;
     return true;
