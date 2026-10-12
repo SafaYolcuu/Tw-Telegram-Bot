@@ -1,15 +1,19 @@
 /**
  * Barbar Köy Monitörü
  * -------------------
- * village.txt.gz'yi periyodik olarak indirir,
- * yeni oluşan barbar köyleri tespit eder ve Telegram'a bildirir.
+ * Periyodik olarak yeni barbar köyleri tespit eder ve Telegram'a bildirir.
+ *
+ * Varsayılan kaynak (watchContinents doluyken): canlı TWMap
+ *   GET /map.php?v=2&locale=tr_TR&e=…&{x}_{y}=0
+ * Fallback / tüm harita: village.txt.gz (saatlik dump, gecikmeli).
  *
  * Konfigürasyon (config.json içinde):
  *   barbarMonitor: {
  *     enabled: true,
- *     server: "tr105.klanlar.org",
+ *     server: "tr104.klanlar.org",
+ *     dataSource: "map",          // "map" | "village_txt"
  *     intervalMinutes: 5,
- *     watchContinents: ["55"],   // boş → tüm harita
+ *     watchContinents: ["55"],   // boş → village.txt (tüm harita)
  *     minPoints: 0,
  *     maxPoints: 500
  *   }
@@ -25,6 +29,57 @@ import { fileURLToPath } from 'node:url';
 const gunzip = promisify(zlib.gunzip);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dirname, '..', 'barbar-state.json');
+
+const SECTOR_SIZE = 20;
+const MAP_BATCH_SIZE = 25;
+
+// ── Yardımcılar ────────────────────────────────────────────────────────────
+
+/** TW map puanı: "495" veya "5.666" (binlik nokta) → number */
+function parseMapPoints(raw) {
+  if (raw == null) return 0;
+  const s = String(raw).trim().replace(/\./g, '');
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Kıta kodu → [x0, y0] (kıta sol-üst köşesi).
+ * cont = `${Math.floor(y/100)}${Math.floor(x/100)}` (örn. "55" → x 500–599, y 500–599)
+ * @param {string} cont
+ * @returns {[number, number]|null}
+ */
+function continentOrigin(cont) {
+  const s = String(cont).trim();
+  if (!/^\d{2}$/.test(s)) return null;
+  const yDigit = parseInt(s[0], 10);
+  const xDigit = parseInt(s[1], 10);
+  return [xDigit * 100, yDigit * 100];
+}
+
+/**
+ * İzlenen kıtalar için 20×20 sektör id listesi (`"540_540"`).
+ * @param {string[]} continents
+ * @returns {string[]}
+ */
+function sectorIdsForContinents(continents) {
+  const ids = [];
+  const seen = new Set();
+  for (const cont of continents) {
+    const origin = continentOrigin(cont);
+    if (!origin) continue;
+    const [x0, y0] = origin;
+    for (let y = y0; y < y0 + 100; y += SECTOR_SIZE) {
+      for (let x = x0; x < x0 + 100; x += SECTOR_SIZE) {
+        const id = `${x}_${y}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
 
 // ── Köy verisi parse ───────────────────────────────────────────────────────
 
@@ -57,6 +112,45 @@ function parseBarbarVillages(text) {
   return villages;
 }
 
+/**
+ * /map.php sektör JSON'undan barbar köyleri çıkarır.
+ * Village array: [id, img, name, points, ownerId, …] — owner "0" = barbar.
+ * @param {object[]} sectors
+ * @returns {Map<number, {id,coord,name,pts,cont}>}
+ */
+function parseBarbarFromSectors(sectors) {
+  const villages = new Map();
+  for (const sec of sectors) {
+    const sx = Number(sec?.x);
+    const sy = Number(sec?.y);
+    const rows = sec?.data?.villages;
+    if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Array.isArray(rows)) continue;
+
+    for (let yi = 0; yi < rows.length; yi++) {
+      const row = rows[yi];
+      if (!row || Array.isArray(row) || typeof row !== 'object') continue;
+      for (const [xiStr, v] of Object.entries(row)) {
+        if (!Array.isArray(v) || v.length < 5) continue;
+        if (String(v[4]) !== '0') continue; // owner
+
+        const id = parseInt(v[0], 10);
+        const x = sx + parseInt(xiStr, 10);
+        const y = sy + yi;
+        if (!Number.isFinite(id) || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        let name = v[2];
+        if (name === 0 || name === '0' || name == null) name = 'Barbar köyü';
+        else name = String(name);
+
+        const pts = parseMapPoints(v[3]);
+        const cont = `${Math.floor(y / 100)}${Math.floor(x / 100)}`;
+        villages.set(id, { id, coord: `${x}|${y}`, name, pts, cont });
+      }
+    }
+  }
+  return villages;
+}
+
 // ── HTTP ───────────────────────────────────────────────────────────────────
 
 /**
@@ -72,6 +166,75 @@ export async function fetchBarbarVillages(server, userAgent) {
   });
   const buf = await gunzip(Buffer.from(resp.data));
   return parseBarbarVillages(buf.toString('utf-8'));
+}
+
+/**
+ * Canlı TWMap sektör verisi (/map.php?v=2) — watchContinents için.
+ * @param {string} server
+ * @param {string[]} continents
+ * @param {string} [userAgent]
+ * @returns {Promise<Map<number, object>>}
+ */
+export async function fetchBarbarVillagesFromMap(server, continents, userAgent) {
+  const host = String(server || '').replace(/^https?:\/\//, '');
+  const sectorIds = sectorIdsForContinents(continents);
+  if (!sectorIds.length) {
+    throw new Error('map kaynağı için geçerli watchContinents gerekli (örn. ["55","65"])');
+  }
+
+  const headers = { 'User-Agent': userAgent || 'Mozilla/5.0' };
+  const e = Date.now();
+  const allSectors = [];
+
+  for (let i = 0; i < sectorIds.length; i += MAP_BATCH_SIZE) {
+    const batch = sectorIds.slice(i, i + MAP_BATCH_SIZE);
+    const qs = batch.map((id) => `${id}=0`).join('&');
+    const url = `https://${host}/map.php?v=2&locale=tr_TR&e=${e}&${qs}`;
+    const resp = await axios.get(url, {
+      timeout: 30_000,
+      headers,
+      responseType: 'json',
+      validateStatus: (s) => s >= 200 && s < 300,
+    });
+    const data = resp.data;
+    if (!Array.isArray(data)) {
+      throw new Error(`map.php beklenen dizi dönmedi (batch ${i / MAP_BATCH_SIZE + 1})`);
+    }
+    allSectors.push(...data);
+  }
+
+  return parseBarbarFromSectors(allSectors);
+}
+
+/**
+ * dataSource'a göre barbar köylerini çeker.
+ * map başarısız olursa village.txt.gz'ye düşer.
+ * @returns {Promise<{ villages: Map<number, object>, source: string }>}
+ */
+async function loadBarbarVillages(bCfg, userAgent) {
+  const server = bCfg.server ?? 'tr104.klanlar.org';
+  const watchContinents = bCfg.watchContinents ?? [];
+  const wantMap =
+    (bCfg.dataSource ?? (watchContinents.length ? 'map' : 'village_txt')) === 'map';
+
+  if (wantMap && watchContinents.length) {
+    try {
+      const t0 = Date.now();
+      const villages = await fetchBarbarVillagesFromMap(server, watchContinents, userAgent);
+      console.log(
+        `[barbar] kaynak=map sektörler=${sectorIdsForContinents(watchContinents).length} ` +
+          `barbar=${villages.size} ${Date.now() - t0}ms`
+      );
+      return { villages, source: 'map' };
+    } catch (e) {
+      console.error(`[barbar] map kaynağı başarısız, village.txt.gz: ${e.message}`);
+    }
+  }
+
+  const t0 = Date.now();
+  const villages = await fetchBarbarVillages(server, userAgent);
+  console.log(`[barbar] kaynak=village_txt barbar=${villages.size} ${Date.now() - t0}ms`);
+  return { villages, source: 'village_txt' };
 }
 
 // ── State yönetimi ─────────────────────────────────────────────────────────
@@ -124,7 +287,6 @@ function mapLinkForCoord(server, coord) {
 }
 
 function buildMessage(newBarbs, worldLabel, server) {
-  const host = server.replace(/^https?:\/\//, '');
   const contList = [...new Set(newBarbs.map((v) => `K${v.cont}`))].sort().join(', ');
   const header =
     `⚔ <b>${newBarbs.length} yeni barbar köy</b> — ${escHtml(worldLabel)}\n` +
@@ -154,15 +316,16 @@ export async function runBarbarScan({ cfg, sendFn }) {
   const bCfg = cfg.barbarMonitor;
   if (!bCfg?.enabled) return;
 
-  const server          = bCfg.server          ?? 'tr105.klanlar.org';
+  const server          = bCfg.server          ?? 'tr104.klanlar.org';
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;
   const worldLabel      = cfg.worldLabel        ?? 'TW';
 
   let current;
+  let source;
   try {
-    current = await fetchBarbarVillages(server, cfg.userAgent);
+    ({ villages: current, source } = await loadBarbarVillages(bCfg, cfg.userAgent));
   } catch (e) {
     console.error(`[barbar ${new Date().toISOString()}] Köy verisi alınamadı: ${e.message}`);
     return;
@@ -190,7 +353,9 @@ export async function runBarbarScan({ cfg, sendFn }) {
   }
 
   const ts = new Date().toISOString();
-  console.log(`[barbar ${ts}] Toplam barbar: ${current.size} | Yeni koordinat (filtreli): ${newBarbs.length}`);
+  console.log(
+    `[barbar ${ts}] kaynak=${source} Toplam barbar: ${current.size} | Yeni koordinat (filtreli): ${newBarbs.length}`
+  );
 
   if (newBarbs.length > 0) {
     const msg = buildMessage(newBarbs, worldLabel, server);
@@ -217,14 +382,17 @@ export async function getBarbarStatus(cfg) {
   const bCfg = cfg.barbarMonitor;
   if (!bCfg?.enabled) return '<i>Barbar monitörü kapalı.</i>';
 
-  const server          = bCfg.server          ?? 'tr105.klanlar.org';
+  const server          = bCfg.server          ?? 'tr104.klanlar.org';
   const watchContinents = bCfg.watchContinents  ?? [];
   const minPts          = bCfg.minPoints        ?? 0;
   const maxPts          = bCfg.maxPoints        ?? 500;
+  const configuredSource =
+    bCfg.dataSource ?? (watchContinents.length ? 'map' : 'village_txt');
 
   let current;
+  let source;
   try {
-    current = await fetchBarbarVillages(server, cfg.userAgent);
+    ({ villages: current, source } = await loadBarbarVillages(bCfg, cfg.userAgent));
   } catch (e) {
     return `<i>Köy verisi alınamadı: ${escHtml(e.message)}</i>`;
   }
@@ -243,6 +411,9 @@ export async function getBarbarStatus(cfg) {
   return (
     `⚔ <b>Barbar Monitörü</b> — aktif\n\n` +
     `🗺 Sunucu: <code>${escHtml(server)}</code>\n` +
+    `📡 Kaynak: <code>${escHtml(source)}</code>` +
+      (source !== configuredSource ? ` <i>(yapılandırma: ${escHtml(configuredSource)})</i>` : '') +
+      `\n` +
     `📍 Kıtalar: ${escHtml(contLabel)}\n` +
     `📊 Puan aralığı: ${minPts}–${maxPts}\n` +
     `🔢 Takip edilen barbar: <b>${tracked.length}</b>\n` +

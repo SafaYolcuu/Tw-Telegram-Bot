@@ -110,7 +110,7 @@ Böylece gruptaki normal mesajlar da `getUpdates` ile gelir; `telegram-updates` 
 | `worldLabel` | Mesaj başlığında görünen dünya adı (örn. `TR104`) |
 | `wars` | Savaş listesi: `{ name, command, sides: [{ name, tags }] }`. Her savaş bağımsız; `/command` ve digest’te taraflar arası + taraf toplamı. |
 | `maxWarConquerPages` | Savaş taramasında klan fetih sayfası üst sınırı (varsayılan 80) |
-| `barbarMonitor` | Yeni barbar köyleri; bildirimler `TELEGRAM_BARBAR_CHAT_ID` grubuna gider. `watchContinents` boşsa tüm harita; örn. `["55","65"]` |
+| `barbarMonitor` | Yeni barbar köyleri; bildirimler `TELEGRAM_BARBAR_CHAT_ID` grubuna gider. `watchContinents` örn. `["55","65"]`. `dataSource`: `map` (canlı `/map.php` sektörleri, kıta listesi gerekir; dump’tan daha taze) veya `village_txt` (saatlik `village.txt.gz`). Map başarısızsa otomatik dump’a düşer. `watchContinents` boşsa dump kullanılır. |
 | `telegramPlayerAliases` | `/info.takma` için takma ad → TW nick (kendiniz doldurun) |
 | `schedule` | Gönderim saatleri `["12:00","00:00"]` — `timezone` ile birlikte. Tam **`00:00`** slotu: fetih sayıları **biten gün** için (Z raporu / gün sonu); diğer saatler **o günün** o ana kadar ki verisi |
 | `timezone` | Örn. `Europe/Istanbul` |

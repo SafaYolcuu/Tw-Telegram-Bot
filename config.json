@@ -46,7 +46,8 @@
   "barbarMonitor": {
     "enabled": true,
     "server": "tr104.klanlar.org",
-    "intervalMinutes": 5,
+    "dataSource": "map",
+    "intervalMinutes": 1,
     "watchContinents": ["55", "56", "65", "66"],
     "minPoints": 0,
     "maxPoints": 500
