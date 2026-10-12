@@ -26,7 +26,6 @@ import {
   worldIndexBaseFromRankingUrl,
 } from './src/playerConquers.js';
 import {
-  collectWarDigestBlocks,
   computeWarStats,
   conquerYmdFromDdMmYyyy,
   formatWarStatsHtml,
@@ -44,7 +43,6 @@ async function collectAndFormat(markdown) {
     timezone: cfg.timezone,
     twStatsDisplayedUtcOffsetMinutes: cfg.twStatsDisplayedUtcOffsetMinutes,
   });
-  results.push(...(await collectWarDigestBlocks(cfg)));
   const worldLabel = cfg.worldLabel || 'TW';
   const tz = cfg.timezone || 'Europe/Istanbul';
   return markdown
@@ -108,8 +106,7 @@ async function buildDigestHtml(cfg, digestOpts = {}) {
     conquerDayYmd: digestOpts.conquerDayYmd,
     twStatsDisplayedUtcOffsetMinutes: cfg.twStatsDisplayedUtcOffsetMinutes,
   });
-  const warBlocks = await collectWarDigestBlocks(cfg, digestOpts);
-  results.push(...warBlocks);
+  // Savaş istatistikleri yalnızca /savas, /vegasvsudw, /vegasvseibo komutlarında
   return formatDigestHtml({
     worldLabel: cfg.worldLabel || 'TW',
     results,
