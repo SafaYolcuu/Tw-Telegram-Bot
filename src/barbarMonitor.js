@@ -132,16 +132,20 @@ function parseBarbarFromSectors(sectors) {
       continue;
     }
 
+    // TWMap: for (p in villages) for (d in villages[p]) —
+    // villages[p] bazen { "5": [...] } objesi, bazen [vill0, vill1, ...] dizisi
+    // (ardışık y-offset 0..n-1). Dizileri atlamak 572|640 gibi köyleri kaçırıyordu.
     for (const pStr of Object.keys(grid)) {
       if (!Object.prototype.hasOwnProperty.call(grid, pStr)) continue;
       const p = parseInt(pStr, 10);
       const col = grid[pStr];
-      if (!Number.isFinite(p) || !col || typeof col !== 'object' || Array.isArray(col)) continue;
+      if (!Number.isFinite(p) || !col || typeof col !== 'object') continue;
 
       for (const dStr of Object.keys(col)) {
         if (!Object.prototype.hasOwnProperty.call(col, dStr)) continue;
         const d = parseInt(dStr, 10);
         const v = col[dStr];
+        // Dizi sütunda boş slot / non-village eleman olabilir
         if (!Number.isFinite(d) || !Array.isArray(v) || v.length < 5) continue;
         if (String(v[4]) !== '0') continue; // owner
 
