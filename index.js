@@ -106,7 +106,7 @@ async function buildDigestHtml(cfg, digestOpts = {}) {
     conquerDayYmd: digestOpts.conquerDayYmd,
     twStatsDisplayedUtcOffsetMinutes: cfg.twStatsDisplayedUtcOffsetMinutes,
   });
-  // Savaş istatistikleri yalnızca /savas, /vegasvsudw, /vegasvseibo komutlarında
+  // Savaş istatistikleri yalnızca /savas ve config.wars komutlarında (/vegasvsudw, /vegasvseibo, /eibovsudw, …)
   return formatDigestHtml({
     worldLabel: cfg.worldLabel || 'TW',
     results,

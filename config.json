@@ -41,6 +41,20 @@
           "tags": ["EİBO", "EİBO K", "EİBO 2", "EİBO 3", "EK 2"]
         }
       ]
+    },
+    {
+      "name": "Eibo vs UDW",
+      "command": "eibovsudw",
+      "sides": [
+        {
+          "name": "Eibo",
+          "tags": ["EİBO", "EİBO K", "EİBO 2", "EİBO 3", "EK 2"]
+        },
+        {
+          "name": "UDW",
+          "tags": ["UDW-A", "UDW-25", "UDW-2", "UDWK53", "UDW"]
+        }
+      ]
     }
   ],
   "barbarMonitor": {
