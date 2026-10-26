@@ -130,6 +130,27 @@ function formatOwnerBb({ player, ally }) {
 }
 
 /**
+ * TWStats village hücresi → koordinat + kıta (köy adı gerekmez; [coord] forumda ismi de gösterir).
+ * @returns {{ coord: string | null, continent: string | null }}
+ */
+function parseVillageCellText(raw) {
+  const text = normalizeCellText(raw);
+  const cm = text.match(/(\d+)\s*\|\s*(\d+)/);
+  const km = text.match(/\bK\s*(\d{1,2})\b/i);
+  return {
+    coord: cm ? `${cm[1]}|${cm[2]}` : null,
+    continent: km ? `K${km[1]}` : null,
+  };
+}
+
+/** ([coord]x|y[/coord]) K46 */
+function formatVillageBb({ coord, continent }) {
+  const c = coord ? `([coord]${coord}[/coord])` : '(—)';
+  const k = continent ? ` ${continent}` : '';
+  return `${c}${k}`;
+}
+
+/**
  * @param {Map<string, Array<object>>} map
  * @param {string} key
  * @param {object} row
@@ -191,7 +212,7 @@ function parseWarEnnoblementsPage(
   const $table = findEnnoblementsTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
+  /** @type {Map<string, Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetails = new Map();
   /** @type {Map<number, number>} */
   const sideGains = new Map();
@@ -246,8 +267,10 @@ function parseWarEnnoblementsPage(
         : '—';
     const oldO = parseOwnerCell($, tds[oldIdx]);
     const newO = parseOwnerCell($, tds[newIdx]);
+    const vInfo = parseVillageCellText(village);
     pushCrossDetail(crossDetails, key, {
-      village: village || '—',
+      coord: vInfo.coord,
+      continent: vInfo.continent,
       when: dateRaw,
       oldPlayer: oldO.player,
       oldAlly: oldO.ally,
@@ -276,7 +299,7 @@ function parseCrossSideGainsFromPage(
   const $table = findTribeConquerTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
+  /** @type {Map<string, Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetails = new Map();
   let sideGains = 0;
   if (!$table?.length) {
@@ -333,8 +356,10 @@ function parseCrossSideGainsFromPage(
         : '—';
     const oldO = parseOwnerCell($, tds[oldIdx]);
     const newO = parseOwnerCell($, tds[newIdx]);
+    const vInfo = parseVillageCellText(village);
     pushCrossDetail(crossDetails, key, {
-      village: village || '—',
+      coord: vInfo.coord,
+      continent: vInfo.continent,
       when: dateRaw,
       oldPlayer: oldO.player,
       oldAlly: oldO.ally,
@@ -422,7 +447,7 @@ export async function computeWarStats(cfg, war, opts = {}) {
   const sideGainTotals = resolvedSides.map(() => 0);
   /** @type {Map<string, number>} */
   const crossTotals = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
+  /** @type {Map<string, Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetailTotals = new Map();
 
   // Günlük / tarihli: dünya ennoblements (birkaç sayfa) — hızlı
@@ -505,7 +530,7 @@ export async function computeWarStats(cfg, war, opts = {}) {
 
   const sideGains = resolvedSides.map((s, i) => ({ name: s.name, total: sideGainTotals[i] }));
   const cross = [];
-  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }> }>} */
+  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }> }>} */
   const crossWithDetails = [];
   for (let a = 0; a < resolvedSides.length; a++) {
     for (let b = 0; b < resolvedSides.length; b++) {
@@ -602,7 +627,8 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
     c.villages.forEach((v, i) => {
       const oldBb = formatOwnerBb({ player: v.oldPlayer, ally: v.oldAlly });
       const newBb = formatOwnerBb({ player: v.newPlayer, ally: v.newAlly });
-      lines.push(`[b]${i + 1}. ${v.village} | ${v.when} | ${oldBb} → ${newBb}[/b]`);
+      const place = formatVillageBb({ coord: v.coord, continent: v.continent });
+      lines.push(`[b]${i + 1}. ${place} | ${v.when} | ${oldBb} → ${newBb}[/b]`);
     });
     lines.push('');
   }
