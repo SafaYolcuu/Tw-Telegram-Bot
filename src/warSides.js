@@ -726,7 +726,8 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
     lines.push(`[b][color=#ff0000]${c.from} → ${c.to}: ${c.count}[/color][/b]`);
     lines.push('[table]');
     // Not defterinde [br] yok → her fetih ayrı satır; aynı köyde devam satırları boş #/Köy/K
-    lines.push('[**]#[||]Köy[||]K[||]n[||]Saat[||]Kimden[||]Kime[/**]');
+    // Dar sütunlar (#, K, el değiştirme): kısa ayırıcı — ----- sığmıyor, tablo bozuluyor
+    lines.push('[**]#[||]Köy[||]K[||]el değiştirme[||]Saat[||]Kimden[||]Kime[/**]');
     let rowNum = 0;
     const villages = c.villages;
     for (let vi = 0; vi < villages.length; vi++) {
@@ -748,7 +749,7 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
         }
       });
       if (vi < villages.length - 1) {
-        lines.push('[*]-----[|]-----[|]-----[|]-----[|]-----[|]-----[|]-----');
+        lines.push('[*]-[|]-----[|]-[|]-[|]-----[|]-----[|]-----');
       }
     }
     lines.push('[/table]');
