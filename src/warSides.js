@@ -693,8 +693,18 @@ export function formatWarStatsHtml(stats, extra = {}) {
   return lines.join('\n');
 }
 
+/** Aynı gün ise sadece saat; değilse tam zaman. */
+function formatWhenShort(when, targetYmd) {
+  const raw = String(when || '').trim();
+  if (targetYmd && raw.startsWith(targetYmd)) {
+    const m = raw.match(/\d{1,2}:\d{2}(?::\d{2})?/);
+    if (m) return m[0];
+  }
+  return raw || '—';
+}
+
 /**
- * Taraflar arası fetih köyleri — forum BBCode (son sahip kuralı + köy gruplu).
+ * Taraflar arası fetih köyleri — oyun not defteri için [table] BBCode.
  * @param {object} stats
  * @param {{ worldLabel?: string }} [extra]
  * @returns {string | null}
@@ -711,22 +721,30 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
     `${dayLine}[/color][/b]`,
     '',
   ];
+
   for (const c of blocks.sort((a, b) => b.count - a.count)) {
-    lines.push(
-      `[b][color=#ff0000]=== ${c.from} → ${c.to}: ${c.count} (listede ${c.villages.length}) ===[/color][/b]`
-    );
+    lines.push(`[b][color=#ff0000]${c.from} → ${c.to}: ${c.count}[/color][/b]`);
+    lines.push('[table]');
+    lines.push('[**]#[||]Köy[||]K[||]n[||]Kronoloji[/**]');
+    let rowNum = 0;
     for (const v of c.villages) {
-      const events = Array.isArray(v.events) && v.events.length
-        ? v.events
-        : [v];
-      const place = formatVillageBb({ coord: v.coord, continent: v.continent });
-      lines.push(`[b]${place} — ${events.length} fetih[/b]`);
-      events.forEach((ev, i) => {
-        const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
-        const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
-        lines.push(`[b]${i + 1}. ${ev.when} | ${oldBb} → ${newBb}[/b]`);
-      });
+      rowNum += 1;
+      const events = Array.isArray(v.events) && v.events.length ? v.events : [v];
+      const coordCell = v.coord ? `[coord]${v.coord}[/coord]` : '—';
+      const kCell = v.continent || '—';
+      const chrono = events
+        .map((ev) => {
+          const t = formatWhenShort(ev.when, stats.targetYmd);
+          const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
+          const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
+          return `${t} ${oldBb} → ${newBb}`;
+        })
+        .join(' · ');
+      lines.push(
+        `[*]${rowNum}[|]${coordCell}[|]${kCell}[|]${events.length}[|]${chrono}`
+      );
     }
+    lines.push('[/table]');
     lines.push('');
   }
   return lines.join('\n').trimEnd() + '\n';
