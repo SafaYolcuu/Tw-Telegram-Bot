@@ -728,7 +728,9 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
     // Not defterinde [br] yok → her fetih ayrı satır; aynı köyde devam satırları boş #/Köy/K
     lines.push('[**]#[||]Köy[||]K[||]n[||]Saat[||]Kimden[||]Kime[/**]');
     let rowNum = 0;
-    for (const v of c.villages) {
+    const villages = c.villages;
+    for (let vi = 0; vi < villages.length; vi++) {
+      const v = villages[vi];
       rowNum += 1;
       const events = Array.isArray(v.events) && v.events.length ? v.events : [v];
       const coordCell = v.coord ? `[coord]${v.coord}[/coord]` : '—';
@@ -745,6 +747,9 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
           lines.push(`[*][|][|][|][|]${t}[|]${oldBb}[|]${newBb}`);
         }
       });
+      if (vi < villages.length - 1) {
+        lines.push('[*]-----[|]-----[|]-----[|]-----[|]-----[|]-----[|]-----');
+      }
     }
     lines.push('[/table]');
     lines.push('');
