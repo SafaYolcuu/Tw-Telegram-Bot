@@ -736,7 +736,7 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
       const coordCell = v.coord ? `[coord]${v.coord}[/coord]` : '—';
       const kCell = v.continent || '—';
       events.forEach((ev, i) => {
-        const t = formatWhenShort(ev.when, stats.targetYmd);
+        const t = `[color=#ff0000]${formatWhenShort(ev.when, stats.targetYmd)}[/color]`;
         const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
         const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
         if (i === 0) {
