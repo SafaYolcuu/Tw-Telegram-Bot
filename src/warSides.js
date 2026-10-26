@@ -109,6 +109,28 @@ function tribeIdFromOwnerTribeCell($, td) {
   return m ? m[1] : null;
 }
 
+/**
+ * @param {import('cheerio').CheerioAPI} $
+ * @param {import('cheerio').Element} td
+ */
+function ownerCellLabel($, td) {
+  return normalizeCellText($(td).text()) || '—';
+}
+
+/**
+ * @param {Map<string, Array<object>>} map
+ * @param {string} key
+ * @param {object} row
+ */
+function pushCrossDetail(map, key, row) {
+  let arr = map.get(key);
+  if (!arr) {
+    arr = [];
+    map.set(key, arr);
+  }
+  arr.push(row);
+}
+
 function tribeConquerIconKind($, tds) {
   if (!tds.length) return 'unknown';
   const src = ($(tds[0]).find('img').first().attr('src') || '').toLowerCase();
@@ -157,16 +179,21 @@ function parseWarEnnoblementsPage(
   const $table = findEnnoblementsTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
+  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  const crossDetails = new Map();
   /** @type {Map<number, number>} */
   const sideGains = new Map();
-  if (!$table?.length) return { cross, sideGains, hitOlderDay: true, tableFound: false };
+  if (!$table?.length) {
+    return { cross, crossDetails, sideGains, hitOlderDay: true, tableFound: false };
+  }
 
   const ths = tableHeaderTexts($, $table);
+  const villageIdx = ths.findIndex((t) => /^village$/i.test(t));
   const dateIdx = ths.findIndex((t) => /date/i.test(t) && /time/i.test(t));
   const oldIdx = ths.findIndex((t) => /^old owner$/i.test(t));
   const newIdx = ths.findIndex((t) => /^new owner$/i.test(t));
   if (dateIdx < 0 || oldIdx < 0 || newIdx < 0) {
-    return { cross, sideGains, hitOlderDay: true, tableFound: true };
+    return { cross, crossDetails, sideGains, hitOlderDay: true, tableFound: true };
   }
 
   const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
@@ -201,8 +228,18 @@ function parseWarEnnoblementsPage(
     if (victimSide == null || victimSide === winnerSide) continue;
     const key = `${winnerSide}->${victimSide}`;
     cross.set(key, (cross.get(key) || 0) + 1);
+    const village =
+      villageIdx >= 0 && tds[villageIdx]
+        ? normalizeCellText($(tds[villageIdx]).text())
+        : '—';
+    pushCrossDetail(crossDetails, key, {
+      village: village || '—',
+      when: dateRaw,
+      oldOwner: ownerCellLabel($, tds[oldIdx]),
+      newOwner: ownerCellLabel($, tds[newIdx]),
+    });
   }
-  return { cross, sideGains, hitOlderDay, tableFound: true };
+  return { cross, crossDetails, sideGains, hitOlderDay, tableFound: true };
 }
 
 /**
@@ -223,15 +260,20 @@ function parseCrossSideGainsFromPage(
   const $table = findTribeConquerTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
+  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  const crossDetails = new Map();
   let sideGains = 0;
-  if (!$table?.length) return { cross, sideGains, hitOlderDay: true, tableFound: false, empty: true };
+  if (!$table?.length) {
+    return { cross, crossDetails, sideGains, hitOlderDay: true, tableFound: false, empty: true };
+  }
 
   const ths = tableHeaderTexts($, $table);
+  const villageIdx = ths.findIndex((t) => /^village$/i.test(t));
   const dateIdx = ths.findIndex((t) => /date/i.test(t) && /time/i.test(t));
   const oldIdx = ths.findIndex((t) => /^old owner$/i.test(t));
   const newIdx = ths.findIndex((t) => /^new owner$/i.test(t));
   if (dateIdx < 0 || oldIdx < 0 || newIdx < 0) {
-    return { cross, sideGains, hitOlderDay: true, tableFound: true, empty: true };
+    return { cross, crossDetails, sideGains, hitOlderDay: true, tableFound: true, empty: true };
   }
 
   const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
@@ -269,9 +311,19 @@ function parseCrossSideGainsFromPage(
 
     const key = `${winnerSideIdx}->${victimSideIdx}`;
     cross.set(key, (cross.get(key) || 0) + 1);
+    const village =
+      villageIdx >= 0 && tds[villageIdx]
+        ? normalizeCellText($(tds[villageIdx]).text())
+        : '—';
+    pushCrossDetail(crossDetails, key, {
+      village: village || '—',
+      when: dateRaw,
+      oldOwner: ownerCellLabel($, tds[oldIdx]),
+      newOwner: ownerCellLabel($, tds[newIdx]),
+    });
   }
 
-  return { cross, sideGains, hitOlderDay, tableFound: true, empty: dataRows <= 0 };
+  return { cross, crossDetails, sideGains, hitOlderDay, tableFound: true, empty: dataRows <= 0 };
 }
 
 async function mapPool(items, concurrency, fn) {
@@ -350,6 +402,8 @@ export async function computeWarStats(cfg, war, opts = {}) {
   const sideGainTotals = resolvedSides.map(() => 0);
   /** @type {Map<string, number>} */
   const crossTotals = new Map();
+  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  const crossDetailTotals = new Map();
 
   // Günlük / tarihli: dünya ennoblements (birkaç sayfa) — hızlı
   // Toplam: klan sayfaları paralel, kısa gecikme
@@ -365,15 +419,23 @@ export async function computeWarStats(cfg, war, opts = {}) {
         console.warn(`[war ennoblements] pn=${pn}: ${e instanceof Error ? e.message : e}`);
         break;
       }
-      const { cross, sideGains, hitOlderDay, tableFound } = parseWarEnnoblementsPage(html, {
-        tribeIdToSideIdx,
-        targetYmd,
-        timeZone: tz,
-        twStatsDisplayedUtcOffsetMinutes: twConfigured,
-      });
+      const { cross, crossDetails, sideGains, hitOlderDay, tableFound } = parseWarEnnoblementsPage(
+        html,
+        {
+          tribeIdToSideIdx,
+          targetYmd,
+          timeZone: tz,
+          twStatsDisplayedUtcOffsetMinutes: twConfigured,
+        }
+      );
       if (!tableFound) break;
       for (const [si, n] of sideGains) sideGainTotals[si] = (sideGainTotals[si] || 0) + n;
       for (const [k, n] of cross) crossTotals.set(k, (crossTotals.get(k) || 0) + n);
+      for (const [k, rows] of crossDetails) {
+        const arr = crossDetailTotals.get(k) || [];
+        arr.push(...rows);
+        crossDetailTotals.set(k, arr);
+      }
       if (hitOlderDay) break;
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -397,17 +459,25 @@ export async function computeWarStats(cfg, war, opts = {}) {
           console.warn(`[war] ${tr.name} pn=${pn}: ${e instanceof Error ? e.message : e}`);
           break;
         }
-        const { cross, sideGains, tableFound, empty } = parseCrossSideGainsFromPage(html, {
-          winnerTribeId: tr.tribeId,
-          winnerSideIdx: si,
-          tribeIdToSideIdx,
-          targetYmd: null,
-          timeZone: tz,
-          twStatsDisplayedUtcOffsetMinutes: twConfigured,
-        });
+        const { cross, crossDetails, sideGains, tableFound, empty } = parseCrossSideGainsFromPage(
+          html,
+          {
+            winnerTribeId: tr.tribeId,
+            winnerSideIdx: si,
+            tribeIdToSideIdx,
+            targetYmd: null,
+            timeZone: tz,
+            twStatsDisplayedUtcOffsetMinutes: twConfigured,
+          }
+        );
         if (!tableFound || empty) break;
         sideGainTotals[si] += sideGains;
         for (const [k, n] of cross) crossTotals.set(k, (crossTotals.get(k) || 0) + n);
+        for (const [k, rows] of crossDetails) {
+          const arr = crossDetailTotals.get(k) || [];
+          arr.push(...rows);
+          crossDetailTotals.set(k, arr);
+        }
         if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
       }
     });
@@ -415,11 +485,23 @@ export async function computeWarStats(cfg, war, opts = {}) {
 
   const sideGains = resolvedSides.map((s, i) => ({ name: s.name, total: sideGainTotals[i] }));
   const cross = [];
+  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ village: string, when: string, oldOwner: string, newOwner: string }> }>} */
+  const crossWithDetails = [];
   for (let a = 0; a < resolvedSides.length; a++) {
     for (let b = 0; b < resolvedSides.length; b++) {
       if (a === b) continue;
-      const n = crossTotals.get(`${a}->${b}`) || 0;
+      const key = `${a}->${b}`;
+      const n = crossTotals.get(key) || 0;
+      const villages = crossDetailTotals.get(key) || [];
       cross.push({ from: resolvedSides[a].name, to: resolvedSides[b].name, count: n });
+      if (n > 0 || villages.length) {
+        crossWithDetails.push({
+          from: resolvedSides[a].name,
+          to: resolvedSides[b].name,
+          count: n,
+          villages,
+        });
+      }
     }
   }
 
@@ -430,6 +512,7 @@ export async function computeWarStats(cfg, war, opts = {}) {
     missingTags,
     sideGains,
     cross,
+    crossDetails: crossWithDetails,
     method: targetYmd ? 'ennoblements' : 'tribe_pages',
   };
 }
@@ -467,7 +550,40 @@ export function formatWarStatsHtml(stats, extra = {}) {
     lines.push('');
     lines.push(`<i>Bulunamayan tag: ${escapeHtml(stats.missingTags.join(', '))}</i>`);
   }
+  if ((stats.crossDetails || []).some((c) => (c.villages || []).length)) {
+    lines.push('');
+    lines.push('<i>Taraflar arası köy listesi ayrı .txt dosyasında.</i>');
+  }
   return lines.join('\n');
+}
+
+/**
+ * Taraflar arası fetih köyleri — doğrulama için düz metin.
+ * @param {object} stats
+ * @param {{ worldLabel?: string }} [extra]
+ * @returns {string | null}
+ */
+export function formatWarCrossDetailsTxt(stats, extra = {}) {
+  if (stats.error) return null;
+  const blocks = (stats.crossDetails || []).filter((c) => (c.villages || []).length);
+  if (!blocks.length) return null;
+
+  const header = [
+    `${stats.warName || 'Savaş'} — ${extra.worldLabel || 'TW'}`,
+    stats.targetYmd ? `Gün: ${stats.targetYmd}` : 'Toplam skor',
+    '',
+  ];
+  const body = [];
+  for (const c of blocks.sort((a, b) => b.count - a.count)) {
+    body.push(`=== ${c.from} → ${c.to}: ${c.count} (listede ${c.villages.length}) ===`);
+    c.villages.forEach((v, i) => {
+      body.push(
+        `${i + 1}. ${v.village} | ${v.when} | ${v.oldOwner} → ${v.newOwner}`
+      );
+    });
+    body.push('');
+  }
+  return [...header, ...body].join('\n').trimEnd() + '\n';
 }
 
 /**

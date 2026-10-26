@@ -17,11 +17,11 @@
       "sides": [
         {
           "name": "Vegas",
-          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "VEGAS1", "CASİN6", "CASİN4"]
+          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "K@M"]
         },
         {
           "name": "UDW",
-          "tags": ["UDW-2", "UDW", "UDW-A", "UDW-25", "UDW-8"]
+          "tags": ["UDW-25", "UDW-A", "UDW", "UDW-8"]
         }
       ]
     },
@@ -31,11 +31,11 @@
       "sides": [
         {
           "name": "Vegas",
-          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "VEGAS1", "CASİN6", "CASİN4"]
+          "tags": ["VEGAS!", "VEGAS*", "VEGA$", "VEG@S", "K@M"]
         },
         {
           "name": "Eibo",
-          "tags": ["EİBO", "EİBO K", "EİBO 2", "EİBO 3", "EK 2"]
+          "tags": ["EİBO", "EİBO 2", "EK 2", "EİBO 3", "EİBO K"]
         }
       ]
     },
@@ -45,11 +45,11 @@
       "sides": [
         {
           "name": "Eibo",
-          "tags": ["EİBO", "EİBO K", "EİBO 2", "EİBO 3", "EK 2"]
+          "tags": ["EİBO", "EİBO 2", "EK 2", "EİBO 3", "EİBO K"]
         },
         {
           "name": "UDW",
-          "tags": ["UDW-2", "UDW", "UDW-A", "UDW-25", "UDW-8"]
+          "tags": ["UDW-25", "UDW-A", "UDW", "UDW-8"]
         }
       ]
     }

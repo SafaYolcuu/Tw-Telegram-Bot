@@ -13,7 +13,7 @@ import {
 import { escapeHtml, formatDigest, formatDigestHtml } from './src/formatMessage.js';
 import { scheduleDigestJobs, scheduleHourlyOnTheHour, scheduleEveryNMinutes } from './src/scheduler.js';
 import { alreadySentToday, markSentToday } from './src/dedupe.js';
-import { sendViaTelegram, setTelegramBotCommands } from './src/sendTelegram.js';
+import { sendViaTelegram, sendViaTelegramDocument, setTelegramBotCommands } from './src/sendTelegram.js';
 import { startTelegramPolling } from './src/telegramPoll.js';
 import { computeTribeTransfers, persistTribeTransferSnapshot, formatTransferAlertsHtml } from './src/tribeTransfers.js';
 import { agentLog } from './src/debugAgentLog.js';
@@ -28,6 +28,7 @@ import {
 import {
   computeWarStats,
   conquerYmdFromDdMmYyyy,
+  formatWarCrossDetailsTxt,
   formatWarStatsHtml,
   normalizeWars,
   warCommandSlug,
@@ -308,6 +309,20 @@ function startBot() {
   const sendBarbar = (text) =>
     sendViaTelegram({ token: barbarToken, chatId: barbarChatId || chatId, text });
   const sendToChat = (targetChatId, text) => sendViaTelegram({ token, chatId: targetChatId, text });
+  const sendWarCrossTxt = async (targetChatId, stats, worldLabel) => {
+    const txt = formatWarCrossDetailsTxt(stats, { worldLabel });
+    if (!txt) return;
+    const dayPart = stats.targetYmd || 'toplam';
+    const slug = warCommandSlug({ name: stats.warName, command: stats.warName });
+    const filename = `${slug || 'savas'}-${dayPart}-koyler.txt`.replace(/[^\w.\-]+/g, '_');
+    await sendViaTelegramDocument({
+      token,
+      chatId: targetChatId,
+      filename,
+      content: txt,
+      caption: `${stats.warName || 'Savaş'} — taraflar arası köy listesi`,
+    });
+  };
 
   /** Komutlar yalnızca Vegas grubunda (Vegas bot polling) */
   const allowedChatIds = [chatId];
@@ -533,13 +548,19 @@ function startBot() {
           const tz = freshCfg.timezone || 'Europe/Istanbul';
           const day = parseOptionalWarDateArg(meta.text, tz);
           const parts = [];
+          /** @type {object[]} */
+          const warStatsList = [];
           for (const war of wars) {
             const stats = await computeWarStats(freshCfg, war, {
               conquerDayYmd: day || ymdInTimeZone(tz),
             });
+            warStatsList.push(stats);
             parts.push(formatWarStatsHtml(stats, { worldLabel: freshCfg.worldLabel }));
           }
           await sendToChat(cid, parts.join('\n\n'));
+          for (const stats of warStatsList) {
+            await sendWarCrossTxt(cid, stats, freshCfg.worldLabel);
+          }
           console.log(`[/savas] ${day || 'bugün'} gönderildi (${cid}).`);
         },
       },
@@ -559,6 +580,7 @@ function startBot() {
               conquerDayYmd: day,
             });
             await sendToChat(cid, formatWarStatsHtml(stats, { worldLabel: freshCfg.worldLabel }));
+            await sendWarCrossTxt(cid, stats, freshCfg.worldLabel);
             console.log(
               `[/${slug}] ${day || 'toplam'} gönderildi (${cid}).`
             );
