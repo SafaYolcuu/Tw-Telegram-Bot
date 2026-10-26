@@ -112,9 +112,21 @@ function tribeIdFromOwnerTribeCell($, td) {
 /**
  * @param {import('cheerio').CheerioAPI} $
  * @param {import('cheerio').Element} td
+ * @returns {{ player: string | null, ally: string | null }}
  */
-function ownerCellLabel($, td) {
-  return normalizeCellText($(td).text()) || '—';
+function parseOwnerCell($, td) {
+  const player = normalizeCellText($(td).find('a.playerlink').first().text()) || null;
+  const ally = normalizeCellText($(td).find('a.tribelink').first().text()) || null;
+  if (player || ally) return { player, ally };
+  const raw = normalizeCellText($(td).text());
+  return { player: raw || null, ally: null };
+}
+
+/** Forum BBCode: [player]X[/player] [[ally]TAG[/ally]] */
+function formatOwnerBb({ player, ally }) {
+  const p = player ? `[player]${player}[/player]` : '—';
+  const a = ally ? ` [[ally]${ally}[/ally]]` : '';
+  return `${p}${a}`;
 }
 
 /**
@@ -179,7 +191,7 @@ function parseWarEnnoblementsPage(
   const $table = findEnnoblementsTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetails = new Map();
   /** @type {Map<number, number>} */
   const sideGains = new Map();
@@ -232,11 +244,15 @@ function parseWarEnnoblementsPage(
       villageIdx >= 0 && tds[villageIdx]
         ? normalizeCellText($(tds[villageIdx]).text())
         : '—';
+    const oldO = parseOwnerCell($, tds[oldIdx]);
+    const newO = parseOwnerCell($, tds[newIdx]);
     pushCrossDetail(crossDetails, key, {
       village: village || '—',
       when: dateRaw,
-      oldOwner: ownerCellLabel($, tds[oldIdx]),
-      newOwner: ownerCellLabel($, tds[newIdx]),
+      oldPlayer: oldO.player,
+      oldAlly: oldO.ally,
+      newPlayer: newO.player,
+      newAlly: newO.ally,
     });
   }
   return { cross, crossDetails, sideGains, hitOlderDay, tableFound: true };
@@ -260,7 +276,7 @@ function parseCrossSideGainsFromPage(
   const $table = findTribeConquerTable($);
   /** @type {Map<string, number>} */
   const cross = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetails = new Map();
   let sideGains = 0;
   if (!$table?.length) {
@@ -315,11 +331,15 @@ function parseCrossSideGainsFromPage(
       villageIdx >= 0 && tds[villageIdx]
         ? normalizeCellText($(tds[villageIdx]).text())
         : '—';
+    const oldO = parseOwnerCell($, tds[oldIdx]);
+    const newO = parseOwnerCell($, tds[newIdx]);
     pushCrossDetail(crossDetails, key, {
       village: village || '—',
       when: dateRaw,
-      oldOwner: ownerCellLabel($, tds[oldIdx]),
-      newOwner: ownerCellLabel($, tds[newIdx]),
+      oldPlayer: oldO.player,
+      oldAlly: oldO.ally,
+      newPlayer: newO.player,
+      newAlly: newO.ally,
     });
   }
 
@@ -402,7 +422,7 @@ export async function computeWarStats(cfg, war, opts = {}) {
   const sideGainTotals = resolvedSides.map(() => 0);
   /** @type {Map<string, number>} */
   const crossTotals = new Map();
-  /** @type {Map<string, Array<{ village: string, when: string, oldOwner: string, newOwner: string }>>} */
+  /** @type {Map<string, Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetailTotals = new Map();
 
   // Günlük / tarihli: dünya ennoblements (birkaç sayfa) — hızlı
@@ -485,7 +505,7 @@ export async function computeWarStats(cfg, war, opts = {}) {
 
   const sideGains = resolvedSides.map((s, i) => ({ name: s.name, total: sideGainTotals[i] }));
   const cross = [];
-  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ village: string, when: string, oldOwner: string, newOwner: string }> }>} */
+  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ village: string, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }> }>} */
   const crossWithDetails = [];
   for (let a = 0; a < resolvedSides.length; a++) {
     for (let b = 0; b < resolvedSides.length; b++) {
@@ -558,7 +578,7 @@ export function formatWarStatsHtml(stats, extra = {}) {
 }
 
 /**
- * Taraflar arası fetih köyleri — doğrulama için düz metin.
+ * Taraflar arası fetih köyleri — forum BBCode (klanlar.org yapıştırma).
  * @param {object} stats
  * @param {{ worldLabel?: string }} [extra]
  * @returns {string | null}
@@ -568,22 +588,25 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
   const blocks = (stats.crossDetails || []).filter((c) => (c.villages || []).length);
   if (!blocks.length) return null;
 
-  const header = [
-    `${stats.warName || 'Savaş'} — ${extra.worldLabel || 'TW'}`,
-    stats.targetYmd ? `Gün: ${stats.targetYmd}` : 'Toplam skor',
+  const title = `${stats.warName || 'Savaş'} — ${extra.worldLabel || 'TW'}`;
+  const dayLine = stats.targetYmd ? `Gün: ${stats.targetYmd}` : 'Toplam skor';
+  const lines = [
+    `[b][color=#0000ff]${title}`,
+    `${dayLine}[/color][/b]`,
     '',
   ];
-  const body = [];
   for (const c of blocks.sort((a, b) => b.count - a.count)) {
-    body.push(`=== ${c.from} → ${c.to}: ${c.count} (listede ${c.villages.length}) ===`);
+    lines.push(
+      `[b][color=#ff0000]=== ${c.from} → ${c.to}: ${c.count} (listede ${c.villages.length}) ===[/color][/b]`
+    );
     c.villages.forEach((v, i) => {
-      body.push(
-        `${i + 1}. ${v.village} | ${v.when} | ${v.oldOwner} → ${v.newOwner}`
-      );
+      const oldBb = formatOwnerBb({ player: v.oldPlayer, ally: v.oldAlly });
+      const newBb = formatOwnerBb({ player: v.newPlayer, ally: v.newAlly });
+      lines.push(`[b]${i + 1}. ${v.village} | ${v.when} | ${oldBb} → ${newBb}[/b]`);
     });
-    body.push('');
+    lines.push('');
   }
-  return [...header, ...body].join('\n').trimEnd() + '\n';
+  return lines.join('\n').trimEnd() + '\n';
 }
 
 /**
