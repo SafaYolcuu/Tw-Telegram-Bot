@@ -682,11 +682,6 @@ export function formatWarStatsHtml(stats, extra = {}) {
   } else {
     lines.push('<i>Karşılıklı fetih yok.</i>');
   }
-  lines.push('');
-  lines.push('<b>Taraf toplam alım</b> <i>(tüm kaynaklardan)</i>');
-  for (const s of stats.sideGains || []) {
-    lines.push(`${escapeHtml(s.name)}: <b>${s.total}</b>`);
-  }
   if (stats.missingTags?.length) {
     lines.push('');
     lines.push(`<i>Bulunamayan tag: ${escapeHtml(stats.missingTags.join(', '))}</i>`);
