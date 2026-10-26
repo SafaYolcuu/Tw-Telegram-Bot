@@ -739,7 +739,7 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
           const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
           return `${t} ${oldBb} → ${newBb}`;
         })
-        .join(' · ');
+        .join('[br]');
       lines.push(
         `[*]${rowNum}[|]${coordCell}[|]${kCell}[|]${events.length}[|]${chrono}`
       );
