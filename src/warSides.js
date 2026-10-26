@@ -150,6 +150,128 @@ function formatVillageBb({ coord, continent }) {
   return `${c}${k}`;
 }
 
+/** `2026-10-26 - 13:57:22` → epoch ms (sıralama). */
+function parseConquerWhenMs(when) {
+  const m = String(when || '').match(
+    /(\d{4})-(\d{2})-(\d{2})\s*-\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/
+  );
+  if (!m) return Number.NaN;
+  const ms = Date.UTC(
+    +m[1],
+    +m[2] - 1,
+    +m[3],
+    +m[4],
+    +m[5],
+    m[6] != null ? +m[6] : 0
+  );
+  return Number.isFinite(ms) ? ms : Number.NaN;
+}
+
+function compareConquerWhen(a, b) {
+  const ma = parseConquerWhenMs(a);
+  const mb = parseConquerWhenMs(b);
+  if (Number.isFinite(ma) && Number.isFinite(mb) && ma !== mb) return ma - mb;
+  return String(a || '').localeCompare(String(b || ''), 'tr');
+}
+
+/**
+ * Aynı coord için yalnızca son fetih yönü skor yazar; kronoloji son kazananın altında.
+ * @param {Map<string, Array<object>>} crossDetailTotals key `${fromIdx}->${toIdx}`
+ * @param {Array<{ name: string }>} resolvedSides
+ * @returns {{ cross: Array<{ from: string, to: string, count: number }>, crossDetails: Array<{ from: string, to: string, count: number, villages: Array<object> }> }}
+ */
+function applyLastOwnerCrossRule(crossDetailTotals, resolvedSides) {
+  /** @type {Array<object>} */
+  const flat = [];
+  for (const [key, rows] of crossDetailTotals) {
+    const [aStr, bStr] = String(key).split('->');
+    const fromIdx = parseInt(aStr, 10);
+    const toIdx = parseInt(bStr, 10);
+    if (!Number.isFinite(fromIdx) || !Number.isFinite(toIdx)) continue;
+    const from = resolvedSides[fromIdx]?.name;
+    const to = resolvedSides[toIdx]?.name;
+    if (!from || !to) continue;
+    for (const row of rows || []) {
+      flat.push({ ...row, fromIdx, toIdx, from, to });
+    }
+  }
+
+  /** @type {Map<string, typeof flat>} */
+  const byVillage = new Map();
+  let anon = 0;
+  for (const ev of flat) {
+    const ck = ev.coord ? `c:${ev.coord}` : `anon:${anon++}:${ev.when}:${ev.newPlayer || ''}`;
+    const arr = byVillage.get(ck) || [];
+    arr.push(ev);
+    byVillage.set(ck, arr);
+  }
+
+  /** @type {Map<string, { from: string, to: string, fromIdx: number, toIdx: number, villages: Array<object> }>} */
+  const buckets = new Map();
+
+  for (const [, events] of byVillage) {
+    events.sort((x, y) => compareConquerWhen(x.when, y.when));
+    const last = events[events.length - 1];
+    if (!last) continue;
+    const dirKey = `${last.fromIdx}->${last.toIdx}`;
+    let bucket = buckets.get(dirKey);
+    if (!bucket) {
+      bucket = {
+        from: last.from,
+        to: last.to,
+        fromIdx: last.fromIdx,
+        toIdx: last.toIdx,
+        villages: [],
+      };
+      buckets.set(dirKey, bucket);
+    }
+    bucket.villages.push({
+      coord: last.coord ?? events.find((e) => e.coord)?.coord ?? null,
+      continent: last.continent ?? events.find((e) => e.continent)?.continent ?? null,
+      lastWhen: last.when,
+      events: events.map((e) => ({
+        when: e.when,
+        oldPlayer: e.oldPlayer,
+        oldAlly: e.oldAlly,
+        newPlayer: e.newPlayer,
+        newAlly: e.newAlly,
+        from: e.from,
+        to: e.to,
+      })),
+    });
+  }
+
+  for (const bucket of buckets.values()) {
+    bucket.villages.sort((a, b) => -compareConquerWhen(a.lastWhen, b.lastWhen));
+  }
+
+  const cross = [];
+  const crossDetails = [];
+  for (let a = 0; a < resolvedSides.length; a++) {
+    for (let b = 0; b < resolvedSides.length; b++) {
+      if (a === b) continue;
+      const dirKey = `${a}->${b}`;
+      const bucket = buckets.get(dirKey);
+      const villages = bucket?.villages || [];
+      const count = villages.length;
+      cross.push({
+        from: resolvedSides[a].name,
+        to: resolvedSides[b].name,
+        count,
+      });
+      if (count > 0) {
+        crossDetails.push({
+          from: resolvedSides[a].name,
+          to: resolvedSides[b].name,
+          count,
+          villages,
+        });
+      }
+    }
+  }
+  return { cross, crossDetails };
+}
+
 /**
  * @param {Map<string, Array<object>>} map
  * @param {string} key
@@ -445,8 +567,6 @@ export async function computeWarStats(cfg, war, opts = {}) {
   const twConfigured = cfg.twStatsDisplayedUtcOffsetMinutes;
   /** @type {number[]} */
   const sideGainTotals = resolvedSides.map(() => 0);
-  /** @type {Map<string, number>} */
-  const crossTotals = new Map();
   /** @type {Map<string, Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }>>} */
   const crossDetailTotals = new Map();
 
@@ -464,18 +584,14 @@ export async function computeWarStats(cfg, war, opts = {}) {
         console.warn(`[war ennoblements] pn=${pn}: ${e instanceof Error ? e.message : e}`);
         break;
       }
-      const { cross, crossDetails, sideGains, hitOlderDay, tableFound } = parseWarEnnoblementsPage(
-        html,
-        {
-          tribeIdToSideIdx,
-          targetYmd,
-          timeZone: tz,
-          twStatsDisplayedUtcOffsetMinutes: twConfigured,
-        }
-      );
+      const { crossDetails, sideGains, hitOlderDay, tableFound } = parseWarEnnoblementsPage(html, {
+        tribeIdToSideIdx,
+        targetYmd,
+        timeZone: tz,
+        twStatsDisplayedUtcOffsetMinutes: twConfigured,
+      });
       if (!tableFound) break;
       for (const [si, n] of sideGains) sideGainTotals[si] = (sideGainTotals[si] || 0) + n;
-      for (const [k, n] of cross) crossTotals.set(k, (crossTotals.get(k) || 0) + n);
       for (const [k, rows] of crossDetails) {
         const arr = crossDetailTotals.get(k) || [];
         arr.push(...rows);
@@ -504,20 +620,16 @@ export async function computeWarStats(cfg, war, opts = {}) {
           console.warn(`[war] ${tr.name} pn=${pn}: ${e instanceof Error ? e.message : e}`);
           break;
         }
-        const { cross, crossDetails, sideGains, tableFound, empty } = parseCrossSideGainsFromPage(
-          html,
-          {
-            winnerTribeId: tr.tribeId,
-            winnerSideIdx: si,
-            tribeIdToSideIdx,
-            targetYmd: null,
-            timeZone: tz,
-            twStatsDisplayedUtcOffsetMinutes: twConfigured,
-          }
-        );
+        const { crossDetails, sideGains, tableFound, empty } = parseCrossSideGainsFromPage(html, {
+          winnerTribeId: tr.tribeId,
+          winnerSideIdx: si,
+          tribeIdToSideIdx,
+          targetYmd: null,
+          timeZone: tz,
+          twStatsDisplayedUtcOffsetMinutes: twConfigured,
+        });
         if (!tableFound || empty) break;
         sideGainTotals[si] += sideGains;
-        for (const [k, n] of cross) crossTotals.set(k, (crossTotals.get(k) || 0) + n);
         for (const [k, rows] of crossDetails) {
           const arr = crossDetailTotals.get(k) || [];
           arr.push(...rows);
@@ -529,26 +641,10 @@ export async function computeWarStats(cfg, war, opts = {}) {
   }
 
   const sideGains = resolvedSides.map((s, i) => ({ name: s.name, total: sideGainTotals[i] }));
-  const cross = [];
-  /** @type {Array<{ from: string, to: string, count: number, villages: Array<{ coord: string | null, continent: string | null, when: string, oldPlayer: string | null, oldAlly: string | null, newPlayer: string | null, newAlly: string | null }> }>} */
-  const crossWithDetails = [];
-  for (let a = 0; a < resolvedSides.length; a++) {
-    for (let b = 0; b < resolvedSides.length; b++) {
-      if (a === b) continue;
-      const key = `${a}->${b}`;
-      const n = crossTotals.get(key) || 0;
-      const villages = crossDetailTotals.get(key) || [];
-      cross.push({ from: resolvedSides[a].name, to: resolvedSides[b].name, count: n });
-      if (n > 0 || villages.length) {
-        crossWithDetails.push({
-          from: resolvedSides[a].name,
-          to: resolvedSides[b].name,
-          count: n,
-          villages,
-        });
-      }
-    }
-  }
+  const { cross, crossDetails: crossWithDetails } = applyLastOwnerCrossRule(
+    crossDetailTotals,
+    resolvedSides
+  );
 
   return {
     error: null,
@@ -603,7 +699,7 @@ export function formatWarStatsHtml(stats, extra = {}) {
 }
 
 /**
- * Taraflar arası fetih köyleri — forum BBCode (klanlar.org yapıştırma).
+ * Taraflar arası fetih köyleri — forum BBCode (son sahip kuralı + köy gruplu).
  * @param {object} stats
  * @param {{ worldLabel?: string }} [extra]
  * @returns {string | null}
@@ -624,12 +720,18 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
     lines.push(
       `[b][color=#ff0000]=== ${c.from} → ${c.to}: ${c.count} (listede ${c.villages.length}) ===[/color][/b]`
     );
-    c.villages.forEach((v, i) => {
-      const oldBb = formatOwnerBb({ player: v.oldPlayer, ally: v.oldAlly });
-      const newBb = formatOwnerBb({ player: v.newPlayer, ally: v.newAlly });
+    for (const v of c.villages) {
+      const events = Array.isArray(v.events) && v.events.length
+        ? v.events
+        : [v];
       const place = formatVillageBb({ coord: v.coord, continent: v.continent });
-      lines.push(`[b]${i + 1}. ${place} | ${v.when} | ${oldBb} → ${newBb}[/b]`);
-    });
+      lines.push(`[b]${place} — ${events.length} fetih[/b]`);
+      events.forEach((ev, i) => {
+        const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
+        const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
+        lines.push(`[b]${i + 1}. ${ev.when} | ${oldBb} → ${newBb}[/b]`);
+      });
+    }
     lines.push('');
   }
   return lines.join('\n').trimEnd() + '\n';
