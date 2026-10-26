@@ -725,24 +725,26 @@ export function formatWarCrossDetailsTxt(stats, extra = {}) {
   for (const c of blocks.sort((a, b) => b.count - a.count)) {
     lines.push(`[b][color=#ff0000]${c.from} → ${c.to}: ${c.count}[/color][/b]`);
     lines.push('[table]');
-    lines.push('[**]#[||]Köy[||]K[||]n[||]Kronoloji[/**]');
+    // Not defterinde [br] yok → her fetih ayrı satır; aynı köyde devam satırları boş #/Köy/K
+    lines.push('[**]#[||]Köy[||]K[||]n[||]Saat[||]Kimden[||]Kime[/**]');
     let rowNum = 0;
     for (const v of c.villages) {
       rowNum += 1;
       const events = Array.isArray(v.events) && v.events.length ? v.events : [v];
       const coordCell = v.coord ? `[coord]${v.coord}[/coord]` : '—';
       const kCell = v.continent || '—';
-      const chrono = events
-        .map((ev) => {
-          const t = formatWhenShort(ev.when, stats.targetYmd);
-          const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
-          const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
-          return `${t} ${oldBb} → ${newBb}`;
-        })
-        .join('[br]');
-      lines.push(
-        `[*]${rowNum}[|]${coordCell}[|]${kCell}[|]${events.length}[|]${chrono}`
-      );
+      events.forEach((ev, i) => {
+        const t = formatWhenShort(ev.when, stats.targetYmd);
+        const oldBb = formatOwnerBb({ player: ev.oldPlayer, ally: ev.oldAlly });
+        const newBb = formatOwnerBb({ player: ev.newPlayer, ally: ev.newAlly });
+        if (i === 0) {
+          lines.push(
+            `[*]${rowNum}[|]${coordCell}[|]${kCell}[|]${events.length}[|]${t}[|]${oldBb}[|]${newBb}`
+          );
+        } else {
+          lines.push(`[*][|][|][|][|]${t}[|]${oldBb}[|]${newBb}`);
+        }
+      });
     }
     lines.push('[/table]');
     lines.push('');
