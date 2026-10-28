@@ -8,7 +8,6 @@ import {
   parseTribeTopWithIds,
   resolveTwStatsUtcOffsetMinutes,
   tribeConquersListUrl,
-  twStatsConquerCellLocalYmd,
   ymdInTimeZone,
 } from './scrape.js';
 import { escapeHtml } from './formatMessage.js';
@@ -352,8 +351,7 @@ function parseWarEnnoblementsPage(
     return { cross, crossDetails, sideGains, hitOlderDay: true, tableFound: true };
   }
 
-  // Savaş günü = TWStats hücresindeki takvim günü (CET→İstanbul kayması yok).
-  // Aksi halde 22:08 CET ertesi gün TR oluyor; sitede 27 görünen fetih /27102026'da düşüyordu.
+  const twOff = resolveTwStatsUtcOffsetMinutes(html, twStatsDisplayedUtcOffsetMinutes);
   const trs = $table.find('tr').toArray();
   let hitOlderDay = false;
 
@@ -364,7 +362,7 @@ function parseWarEnnoblementsPage(
     if (tds.length <= Math.max(dateIdx, oldIdx, newIdx)) continue;
 
     const dateRaw = normalizeCellText($(tds[dateIdx]).text());
-    const reportYmd = twStatsConquerCellLocalYmd(dateRaw);
+    const reportYmd = conquerReportYmdFromTwCell(dateRaw, timeZone, twOff);
     if (!reportYmd) continue;
     if (reportYmd < targetYmd) {
       hitOlderDay = true;

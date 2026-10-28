@@ -7,7 +7,7 @@
   "playerConquerStatsDays": 3,
   "maxPlayerConquerPages": 35,
   "maxWarConquerPages": 25,
-  "maxWarEnnoblementPages": 80,
+  "maxWarEnnoblementPages": 40,
   "warRequestDelayMs": 100,
   "warTribeConcurrency": 4,
   "warRankingScanRows": 400,
